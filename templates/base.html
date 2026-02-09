@@ -1,0 +1,75 @@
+{% load i18n static %}
+<!doctype html>
+<html lang="{{ LANGUAGE_CODE }}" dir="{% if LANGUAGE_CODE == 'ar' %}rtl{% else %}ltr{% endif %}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#1f5eff">
+    <title>{% block title %}{% trans "Barber CRM" %}{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body>
+{% if user.is_authenticated %}
+    <div class="app-shell">
+        <aside class="app-sidebar">
+            <div class="sidebar-inner">
+                <a class="brand sidebar-brand" href="{% url 'dashboard' %}">
+                    <img src="{% static 'brand/white-logo.webp' %}" alt="{% trans 'Brand Logo' %}">
+                    <span>{% trans "Hosari Barber" %}</span>
+                </a>
+                {% with current_url=request.resolver_match.url_name %}
+                    <nav class="sidebar-nav">
+                        <a class="{% if current_url == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">{% trans "Dashboard" %}</a>
+                        <a class="{% if current_url == 'client-list' or current_url == 'client-create' or current_url == 'client-detail' or current_url == 'client-update' %}active{% endif %}" href="{% url 'client-list' %}">{% trans "Clients" %}</a>
+                        <a class="{% if current_url == 'appointment-list' or current_url == 'appointment-update' %}active{% endif %}" href="{% url 'appointment-list' %}">{% trans "Appointments" %}</a>
+                        <a class="{% if current_url == 'service-list' or current_url == 'service-create' or current_url == 'service-update' %}active{% endif %}" href="{% url 'service-list' %}">{% trans "Services" %}</a>
+                    </nav>
+                {% endwith %}
+                <div class="sidebar-footer">
+                    <form method="post" action="{% url 'switch-language' %}" class="inline-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <label for="language-select">{% trans "Language" %}</label>
+                        <select id="language-select" name="language" onchange="this.form.submit()">
+                            {% get_current_language as CURRENT_LANGUAGE %}
+                            {% get_available_languages as AVAILABLE_LANGUAGES %}
+                            {% for code, name in AVAILABLE_LANGUAGES %}
+                                <option value="{{ code }}" {% if code == CURRENT_LANGUAGE %}selected{% endif %}>{{ name }}</option>
+                            {% endfor %}
+                        </select>
+                    </form>
+                    <form method="post" action="{% url 'logout' %}">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-outline sidebar-logout">{% trans "Logout" %}</button>
+                    </form>
+                </div>
+            </div>
+        </aside>
+        <main class="page app-main">
+{% else %}
+    <header class="topbar">
+        <a class="brand" href="{% url 'login' %}">
+            <img src="{% static 'brand/white-logo.webp' %}" alt="{% trans 'Brand Logo' %}">
+            <span>{% trans "Hosari Barber" %}</span>
+        </a>
+        <nav class="topbar-nav">
+            <a class="btn btn-outline btn-sm" href="{% url 'ai-playground-start' %}">{% trans "AI Playground" %}</a>
+        </nav>
+    </header>
+    <main class="page page-auth">
+{% endif %}
+            {% if messages %}
+                <section class="messages">
+                    {% for message in messages %}
+                        <div class="message {{ message.tags }}">{{ message }}</div>
+                    {% endfor %}
+                </section>
+            {% endif %}
+            {% block content %}{% endblock %}
+        </main>
+{% if user.is_authenticated %}
+    </div>
+{% endif %}
+{% block extra_js %}{% endblock %}
+</body>
+</html>

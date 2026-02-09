@@ -1,0 +1,16 @@
+{% extends "ai_playground/base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Session Required" %} · {% trans "AI Playground" %}{% endblock %}
+
+{% block content %}
+<section class="card ai-playground-card">
+    <h1>{% trans "Session expired or missing" %}</h1>
+    <p class="muted">
+        {% blocktrans with minutes=session_duration_minutes %}
+            This experience requires a shop session. Scan the QR code to start a new {{ minutes }}-minute session.
+        {% endblocktrans %}
+    </p>
+    <a class="btn" href="{% url start_url %}">{% trans "Start new session" %}</a>
+</section>
+{% endblock %}

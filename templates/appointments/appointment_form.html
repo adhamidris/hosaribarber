@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{{ title }} · {% trans "Barber CRM" %}{% endblock %}
+
+{% block content %}
+<section class="card">
+    <h1>{{ title }}</h1>
+    <p class="muted">{{ appointment.client.full_name }} · {{ appointment.client.phone }}</p>
+    <form method="post" class="stack-form">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        {% for field in form %}
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.errors %}
+                <div class="form-error">{{ field.errors|join:", " }}</div>
+            {% endif %}
+        {% endfor %}
+        <div class="form-actions">
+            <button type="submit" class="btn">{% trans "Save" %}</button>
+            <a href="{% url 'appointment-list' %}" class="btn btn-outline">{% trans "Cancel" %}</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

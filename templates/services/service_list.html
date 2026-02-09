@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Services" %} · {% trans "Barber CRM" %}{% endblock %}
+
+{% block content %}
+<section class="card">
+    <div class="section-header">
+        <h1>{% trans "Service Catalog" %}</h1>
+        <a href="{% url 'service-create' %}" class="btn">{% trans "New service" %}</a>
+    </div>
+    <form method="get" class="inline-form search-form">
+        <input type="search" name="q" value="{{ query }}" placeholder="{% trans 'Search services' %}">
+        <button type="submit" class="btn btn-outline">{% trans "Search" %}</button>
+    </form>
+</section>
+
+<section class="card">
+    {% if services %}
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>{% trans "Service Name" %}</th>
+                    <th>{% trans "Category" %}</th>
+                    <th>{% trans "Price" %}</th>
+                    <th>{% trans "Actions" %}</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for service in services %}
+                    <tr>
+                        <td>{{ service }}</td>
+                        <td>{{ service.get_category_display }}</td>
+                        <td>{{ service.price }}</td>
+                        <td>
+                            <a href="{% url 'service-update' service.id %}" class="btn btn-outline btn-sm">{% trans "Edit" %}</a>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="muted">{% trans "No services available yet." %}</p>
+    {% endif %}
+</section>
+{% endblock %}

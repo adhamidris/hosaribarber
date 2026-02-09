@@ -1,0 +1,125 @@
+{% extends "ai_playground/base.html" %}
+{% load i18n static %}
+
+{% block title %}{% trans "AI Playground" %}{% endblock %}
+
+{% block content %}
+<section
+    id="ai-playground-root"
+    data-selfie-upload-url="{% url 'ai-playground-selfie-upload' %}"
+    data-generate-url="{% url 'ai-playground-generate' %}"
+    data-styles-url="{% url 'ai-playground-styles' %}"
+    data-has-selfie="{% if active_session.has_selfie %}true{% else %}false{% endif %}"
+    data-selfie-url="{% if active_session.selfie_image %}{{ active_session.selfie_image.url }}{% endif %}"
+    data-msg-camera-opened="{% trans 'Camera is ready. Capture your selfie.' %}"
+    data-msg-camera-denied="{% trans 'Camera access failed. Use file upload instead.' %}"
+    data-msg-camera-busy="{% trans 'Camera is in use by another app or tab. Close other camera apps and retry.' %}"
+    data-msg-camera-not-found="{% trans 'No camera device was found on this device.' %}"
+    data-msg-camera-secure-context="{% trans 'Camera requires HTTPS (or localhost). Open the page over a secure connection.' %}"
+    data-msg-selfie-required="{% trans 'Upload a selfie before trying styles.' %}"
+    data-msg-selfie-saved="{% trans 'Selfie saved. Now choose a haircut style.' %}"
+    data-msg-selfie-save-failed="{% trans 'Could not save selfie. Please retry.' %}"
+    data-msg-selfie-uploading="{% trans 'Saving selfie...' %}"
+    data-msg-selfie-captured="{% trans 'Selfie captured. Saving...' %}"
+    data-msg-selfie-selected="{% trans 'Selfie selected. Saving...' %}"
+    data-msg-selfie-retake-ready="{% trans 'Retake ready. Capture or upload a new selfie.' %}"
+    data-msg-custom-style-required="{% trans 'Upload a custom haircut image first.' %}"
+    data-msg-generate-failed="{% trans 'Generation request failed.' %}"
+    data-msg-generate-started="{% trans 'Request sent. Preparing AI transformation...' %}"
+    data-msg-generate-complete="{% trans 'Preview is ready.' %}"
+>
+    <section class="card ai-playground-card">
+        <div class="section-header">
+            <div>
+                <h1>{% trans "AI Playground" %}</h1>
+                <p class="muted">{% trans "Take a selfie, choose a style, and run a simulated haircut preview." %}</p>
+            </div>
+            <span class="badge">
+                {% trans "Session expires at" %} {{ active_session.expires_at|date:"Y-m-d H:i" }}
+            </span>
+        </div>
+    </section>
+
+    <section class="card ai-playground-card">
+        <h2>{% trans "Step 1 · Selfie" %}</h2>
+        <p class="muted">{% trans "Use the camera or upload a clear frontal photo." %}</p>
+        <div class="ai-selfie-grid">
+            <div>
+                <video id="selfie-video" class="camera-video hidden" autoplay playsinline muted></video>
+                <img id="selfie-preview" class="camera-preview{% if not active_session.selfie_image %} hidden{% endif %}" src="{% if active_session.selfie_image %}{{ active_session.selfie_image.url }}{% endif %}" alt="{% trans 'Selfie preview' %}">
+                <p id="selfie-status" class="muted">{% trans "No new selfie selected." %}</p>
+                <div class="camera-actions">
+                    <button id="open-selfie-camera-btn" type="button" class="btn btn-outline">{% trans "Open camera" %}</button>
+                    <button id="capture-selfie-btn" type="button" class="btn" disabled>{% trans "Capture" %}</button>
+                    <button id="retake-selfie-btn" type="button" class="btn btn-outline" disabled>{% trans "Retake" %}</button>
+                </div>
+            </div>
+            <div>
+                <label for="selfie-input">{% trans "Upload selfie image" %}</label>
+                <input id="selfie-input" type="file" accept="image/jpeg,image/png,image/webp" capture="user">
+                <small class="muted">{% trans "Supported formats: JPG, PNG, WEBP." %}</small>
+            </div>
+        </div>
+    </section>
+
+    <section id="style-step" class="card ai-playground-card{% if not active_session.has_selfie %} is-disabled{% endif %}">
+        <h2>{% trans "Step 2 · Pick Haircut Style" %}</h2>
+        <p class="muted">{% trans "Choose one curated style or upload your own desired haircut image." %}</p>
+        <div class="photo-strip ai-style-strip">
+            {% for style in styles %}
+                <article class="photo-item ai-style-card">
+                    <img src="{{ style.image.url }}" alt="{{ style.name }}">
+                    <strong>{{ style.name }}</strong>
+                    <button type="button" class="btn btn-sm js-generate-style" data-style-id="{{ style.id }}">
+                        {% trans "Try this style" %}
+                    </button>
+                </article>
+            {% empty %}
+                <p class="muted">{% trans "No active styles yet. Add them from Django admin." %}</p>
+            {% endfor %}
+        </div>
+        <form id="custom-style-form" class="stack-form ai-custom-style-form">
+            <label for="custom-style-input">{% trans "Upload your desired haircut image" %}</label>
+            <input id="custom-style-input" name="custom_style_image" type="file" accept="image/jpeg,image/png,image/webp">
+            <button id="custom-style-submit-btn" type="submit" class="btn">{% trans "Generate with uploaded style" %}</button>
+        </form>
+    </section>
+
+    <section class="card ai-playground-card">
+        <h2>{% trans "Step 3 · Generation" %}</h2>
+        <div id="generate-loader" class="ai-generate-loader hidden">
+            <span class="ai-spinner" aria-hidden="true"></span>
+            <span>{% trans "Generating preview..." %}</span>
+        </div>
+        <p id="generate-status" class="muted">
+            {% if latest_generation %}
+                {% trans "Latest generated preview restored for this session." %}
+            {% else %}
+                {% trans "Waiting for a style selection." %}
+            {% endif %}
+        </p>
+        <img
+            id="generated-result-image"
+            class="camera-preview{% if not latest_generation %} hidden{% endif %}"
+            {% if latest_generation %}src="{{ latest_generation.result_image.url }}"{% endif %}
+            alt="{% trans 'Generated haircut preview' %}"
+        >
+        <ul id="generation-log" class="ai-generation-log">
+            {% for generation in recent_generations %}
+                <li>
+                    {% if generation.style %}
+                        {{ generation.style.name }}
+                    {% else %}
+                        {% trans "Custom style" %}
+                    {% endif %}
+                    · #{{ generation.id }} · {{ generation.status }} · {{ generation.provider|default:"unknown" }}{% if generation.processing_ms %} · {{ generation.processing_ms }}ms{% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    </section>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/ai-playground.js' %}"></script>
+{% endblock %}

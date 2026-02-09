@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Clients" %} · {% trans "Barber CRM" %}{% endblock %}
+
+{% block content %}
+<section class="card">
+    <div class="section-header">
+        <h1>{% trans "Clients" %}</h1>
+        <a href="{% url 'client-create' %}" class="btn">{% trans "New client" %}</a>
+    </div>
+    <form method="get" class="inline-form search-form">
+        <input type="search" name="q" value="{{ query }}" placeholder="{% trans 'Search by name or phone' %}">
+        <button type="submit" class="btn btn-outline">{% trans "Search" %}</button>
+    </form>
+</section>
+
+<section class="card">
+    {% if clients %}
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Phone" %}</th>
+                    <th>{% trans "Drink" %}</th>
+                    <th>{% trans "Marketing" %}</th>
+                    <th>{% trans "Photo Consent" %}</th>
+                    <th>{% trans "Actions" %}</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for client in clients %}
+                    <tr>
+                        <td><a href="{% url 'client-detail' client.id %}">{{ client.full_name }}</a></td>
+                        <td>{{ client.phone }}</td>
+                        <td>{{ client.preferred_drink|default:"-" }}</td>
+                        <td>{% if client.marketing_opt_in %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</td>
+                        <td>{% if client.photo_marketing_opt_in %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</td>
+                        <td>
+                            <a href="{% url 'client-update' client.id %}" class="btn btn-outline btn-sm">{% trans "Edit" %}</a>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="muted">{% trans "No clients found yet." %}</p>
+    {% endif %}
+</section>
+{% endblock %}

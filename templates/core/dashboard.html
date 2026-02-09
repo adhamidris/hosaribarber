@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Dashboard" %} · {% trans "Barber CRM" %}{% endblock %}
+
+{% block content %}
+<section class="grid">
+    <article class="card">
+        <h2>{% trans "Role" %}</h2>
+        <p>{{ request.user.get_role_display }}</p>
+    </article>
+    <article class="card">
+        <h2>{% trans "Language" %}</h2>
+        <p>{{ request.user.preferred_language|upper }}</p>
+    </article>
+    <article class="card">
+        <h2>{% trans "Timezone" %}</h2>
+        <p>Africa/Cairo</p>
+    </article>
+    <article class="card">
+        <h2>{% trans "Clients" %}</h2>
+        <p>{{ client_count }}</p>
+    </article>
+    <article class="card">
+        <h2>{% trans "Active Services" %}</h2>
+        <p>{{ service_count }}</p>
+    </article>
+    <article class="card">
+        <h2>{% trans "Appointments Today" %}</h2>
+        <p>{{ appointment_count }}</p>
+    </article>
+    <article class="card">
+        <h2>{% trans "Walk-ins Today" %}</h2>
+        <p>{{ walk_in_count }}</p>
+    </article>
+</section>
+{% endblock %}

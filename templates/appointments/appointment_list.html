@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% load i18n static l10n %}
+
+{% block title %}{% trans "Appointments" %} · {% trans "Barber CRM" %}{% endblock %}
+
+{% block content %}
+<section class="card">
+    <div class="section-header">
+        <h1>{% trans "Appointments & Walk-ins" %}</h1>
+        <button type="button" class="btn" data-modal-open="appointment-entry-modal">{% trans "New appointment" %}</button>
+    </div>
+    <form method="get" class="inline-form filters-form">
+        <label for="scope">{% trans "View" %}</label>
+        <select id="scope" name="scope">
+            <option value="today_queue" {% if scope == 'today_queue' %}selected{% endif %}>{% trans "Today's queue" %}</option>
+            <option value="upcoming_7_days" {% if scope == 'upcoming_7_days' %}selected{% endif %}>{% trans "Upcoming bookings (next 7 days)" %}</option>
+            <option value="upcoming_month" {% if scope == 'upcoming_month' %}selected{% endif %}>{% trans "Upcoming bookings (next month)" %}</option>
+            <option value="all_history" {% if scope == 'all_history' %}selected{% endif %}>{% trans "All history" %}</option>
+        </select>
+        <label for="entry_type">{% trans "Type" %}</label>
+        <select id="entry_type" name="entry_type">
+            <option value="all" {% if entry_type == 'all' %}selected{% endif %}>{% trans "All types" %}</option>
+            <option value="booking" {% if entry_type == 'booking' %}selected{% endif %}>{% trans "Bookings only" %}</option>
+            <option value="walk_in" {% if entry_type == 'walk_in' %}selected{% endif %}>{% trans "Walk-ins only" %}</option>
+        </select>
+        <input type="search" name="q" value="{{ query }}" placeholder="{% trans 'Client, phone, barber' %}">
+        <button type="submit" class="btn btn-outline">{% trans "Filter" %}</button>
+    </form>
+</section>
+
+<div
+    id="appointment-entry-modal"
+    class="modal-overlay{% if show_entry_modal %} is-open{% endif %}"
+>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="appointment-entry-title">
+        <div class="section-header">
+            <h2 id="appointment-entry-title">{% trans "New appointment / walk-in" %}</h2>
+            <button type="button" class="btn btn-outline btn-sm" data-modal-close>{% trans "Close" %}</button>
+        </div>
+        <form
+            method="post"
+            class="stack-form"
+            data-client-lookup-url="{{ client_lookup_url }}"
+            data-client-found-message="{% trans 'Existing client found. Name filled automatically.' %}"
+            data-client-missing-message="{% trans 'No existing client found for this phone. Enter the client name.' %}"
+        >
+            {% csrf_token %}
+            {{ entry_form.non_field_errors }}
+
+            <label for="{{ entry_form.classification.id_for_label }}">{{ entry_form.classification.label }}</label>
+            {{ entry_form.classification }}
+            {% if entry_form.classification.errors %}
+                <div class="form-error">{{ entry_form.classification.errors|join:", " }}</div>
+            {% endif %}
+
+            <div data-visible-for="all">
+                <label for="{{ entry_form.phone.id_for_label }}">{{ entry_form.phone.label }}</label>
+                {{ entry_form.phone }}
+                {% if entry_form.phone.errors %}
+                    <div class="form-error">{{ entry_form.phone.errors|join:", " }}</div>
+                {% endif %}
+                <small class="muted js-phone-lookup-hint"></small>
+            </div>
+
+            <div data-visible-for="all">
+                <label for="{{ entry_form.full_name.id_for_label }}">{{ entry_form.full_name.label }}</label>
+                {{ entry_form.full_name }}
+                {% if entry_form.full_name.errors %}
+                    <div class="form-error">{{ entry_form.full_name.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div data-visible-for="all">
+                <label for="{{ entry_form.barber.id_for_label }}">{{ entry_form.barber.label }}</label>
+                {{ entry_form.barber }}
+                {% if entry_form.barber.errors %}
+                    <div class="form-error">{{ entry_form.barber.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div data-visible-for="all">
+                <label>{{ entry_form.services.label }}</label>
+                <div class="service-category-list">
+                    {% for group in grouped_services %}
+                        <details class="service-category"{% if group.expanded %} open{% endif %}>
+                            <summary>{{ group.label }}</summary>
+                            <div class="service-options">
+                                {% for service in group.services %}
+                                    <label class="service-option">
+                                        <input
+                                            type="checkbox"
+                                            name="services"
+                                            value="{{ service.id }}"
+                                            data-service-price="{{ service.price|unlocalize }}"
+                                            {% if service.id|stringformat:'s' in selected_service_ids %}checked{% endif %}
+                                        >
+                                        <span>{{ service }}</span>
+                                        <small class="muted">
+                                            {{ service.price }}
+                                            {% if default_currency %}{{ default_currency }}{% endif %}
+                                        </small>
+                                    </label>
+                                {% endfor %}
+                            </div>
+                        </details>
+                    {% endfor %}
+                </div>
+                {% if entry_form.services.errors %}
+                    <div class="form-error">{{ entry_form.services.errors|join:", " }}</div>
+                {% endif %}
+                <p class="muted">
+                    <span class="js-selected-services-count">0</span> {% trans "service(s) selected" %}
+                </p>
+                <p class="muted">
+                    <strong>
+                        {% trans "Final price" %}: <span class="js-final-price">0.00</span>
+                        {% if default_currency %}{{ default_currency }}{% endif %}
+                    </strong>
+                </p>
+            </div>
+
+            <div data-visible-for="booking">
+                <label for="{{ entry_form.start_at.id_for_label }}">{{ entry_form.start_at.label }}</label>
+                {{ entry_form.start_at }}
+                {% if entry_form.start_at.errors %}
+                    <div class="form-error">{{ entry_form.start_at.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div data-visible-for="all">
+                <label for="{{ entry_form.notes.id_for_label }}">{{ entry_form.notes.label }}</label>
+                {{ entry_form.notes }}
+                {% if entry_form.notes.errors %}
+                    <div class="form-error">{{ entry_form.notes.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn">{% trans "Save entry" %}</button>
+                <button type="button" class="btn btn-outline" data-modal-close>{% trans "Cancel" %}</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<section class="card">
+    <h2>
+        {% if scope == "all_history" %}
+            {% trans "All Appointments History" %}
+        {% elif scope == "upcoming_7_days" %}
+            {% trans "Upcoming Bookings (Next 7 Days)" %}
+        {% elif scope == "upcoming_month" %}
+            {% trans "Upcoming Bookings (Next Month)" %}
+        {% else %}
+            {% trans "Today's Appointments & Walk-in Queue" %}
+        {% endif %}
+    </h2>
+    {% if appointments %}
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>
+                        {% if scope == "all_history" or scope == "upcoming_7_days" or scope == "upcoming_month" %}
+                            {% trans "Date / Time" %}
+                        {% else %}
+                            {% trans "Time" %}
+                        {% endif %}
+                    </th>
+                    <th>{% trans "Client" %}</th>
+                    <th>{% trans "Phone" %}</th>
+                    <th>{% trans "Barber" %}</th>
+                    <th>{% trans "Services" %}</th>
+                    <th>{% trans "Price" %}</th>
+                    <th>{% trans "Status" %}</th>
+                    <th>{% trans "Type" %}</th>
+                    <th>{% trans "Actions" %}</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for appointment in appointments %}
+                    <tr>
+                        <td>
+                            {% if scope == "all_history" or scope == "upcoming_7_days" or scope == "upcoming_month" %}
+                                {{ appointment.start_at|date:"Y-m-d H:i" }} - {{ appointment.end_at|date:"Y-m-d H:i" }}
+                            {% else %}
+                                {{ appointment.start_at|date:"H:i" }} - {{ appointment.end_at|date:"H:i" }}
+                            {% endif %}
+                        </td>
+                        <td>{{ appointment.client.full_name }}</td>
+                        <td>{{ appointment.client.phone }}</td>
+                        <td>{{ appointment.barber|default:"-" }}</td>
+                        <td>
+                            {% with selected_services=appointment.selected_services %}
+                                {% if selected_services %}
+                                    {% for service in selected_services %}
+                                        <span class="badge">{{ service }}</span>{% if not forloop.last %}<br>{% endif %}
+                                    {% endfor %}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            {% endwith %}
+                        </td>
+                        <td>{{ appointment.total_price }} {% if default_currency %}{{ default_currency }}{% endif %}</td>
+                        <td>{% if appointment.is_walk_in %}-{% else %}{{ appointment.get_status_display }}{% endif %}</td>
+                        <td>{% if appointment.is_walk_in %}{% trans "Walk-in" %}{% else %}{% trans "Appointment" %}{% endif %}</td>
+                        <td class="form-actions">
+                            <a class="btn btn-outline btn-sm" href="{% url 'client-detail' appointment.client_id %}">{% trans "Client" %}</a>
+                            <a class="btn btn-outline btn-sm" href="{% url 'appointment-update' appointment.id %}">{% trans "Edit" %}</a>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        {% if scope == "all_history" %}
+            <p class="muted">{% trans "No appointments found in history." %}</p>
+        {% elif scope == "upcoming_7_days" %}
+            <p class="muted">{% trans "No upcoming bookings in the next 7 days." %}</p>
+        {% elif scope == "upcoming_month" %}
+            <p class="muted">{% trans "No upcoming bookings in the next month." %}</p>
+        {% else %}
+            <p class="muted">{% trans "No appointments in today's queue." %}</p>
+        {% endif %}
+    {% endif %}
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/appointment-entry-modal.js' %}"></script>
+{% endblock %}

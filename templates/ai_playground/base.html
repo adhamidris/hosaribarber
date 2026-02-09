@@ -1,0 +1,24 @@
+{% load i18n static %}
+<!doctype html>
+<html lang="{{ LANGUAGE_CODE }}" dir="{% if LANGUAGE_CODE == 'ar' %}rtl{% else %}ltr{% endif %}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#1f5eff">
+    <title>{% block title %}{% trans "AI Playground" %}{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    <link rel="stylesheet" href="{% static 'css/ai-playground.css' %}">
+</head>
+<body class="ai-playground-body">
+    <header class="ai-playground-topbar">
+        <a class="brand" href="{% url 'ai-playground-home' %}">
+            <img src="{% static 'brand/white-logo.webp' %}" alt="{% trans 'Brand Logo' %}">
+            <span>{% trans "AI Playground" %}</span>
+        </a>
+    </header>
+    <main class="page ai-playground-page">
+        {% block content %}{% endblock %}
+    </main>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

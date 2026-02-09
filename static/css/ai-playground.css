@@ -1,0 +1,136 @@
+.ai-playground-body {
+    background: linear-gradient(180deg, #eef4ff 0%, #f7f8fb 100%);
+}
+
+.ai-playground-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    padding: 0.85rem 1.2rem;
+    border-bottom: 1px solid #dbe4fb;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(6px);
+}
+
+.ai-playground-page {
+    max-width: 980px;
+    margin: 1.2rem auto;
+    padding-bottom: 1.5rem;
+}
+
+.ai-playground-card {
+    margin-bottom: 1rem;
+}
+
+.ai-selfie-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+
+.ai-selfie-grid input[type="file"] {
+    display: block;
+    width: 100%;
+    margin: 0.4rem 0 0.7rem;
+}
+
+.is-disabled {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+.ai-custom-style-form {
+    margin-top: 1rem;
+}
+
+.ai-generate-loader {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin-bottom: 0.6rem;
+}
+
+.ai-spinner {
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    border: 2px solid #c7d8ff;
+    border-top-color: #1f5eff;
+    animation: ai-spin 0.75s linear infinite;
+}
+
+@keyframes ai-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.ai-generation-log {
+    margin: 0.7rem 0 0;
+    padding-inline-start: 1.2rem;
+}
+
+.ai-generation-log li {
+    margin-bottom: 0.35rem;
+}
+
+.ai-style-strip {
+    grid-template-columns: repeat(auto-fill, minmax(190px, 190px));
+    justify-content: flex-start;
+    gap: 0.9rem;
+}
+
+.ai-style-card {
+    width: 190px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.ai-style-card img {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: 8px;
+    margin-bottom: 0;
+}
+
+.ai-style-card strong {
+    font-size: 0.95rem;
+    line-height: 1.25;
+    min-height: 2.4em;
+    display: block;
+    text-align: center;
+    margin: 0;
+}
+
+.ai-style-card .btn {
+    width: 100%;
+}
+
+#generated-result-image {
+    object-fit: contain;
+    aspect-ratio: auto;
+    max-height: min(72vh, 720px);
+    min-height: 220px;
+    background: #0f1014;
+}
+
+@media (max-width: 760px) {
+    .ai-selfie-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .ai-style-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ai-style-card {
+        width: 100%;
+    }
+
+    #generated-result-image {
+        min-height: 170px;
+        max-height: 52vh;
+    }
+}

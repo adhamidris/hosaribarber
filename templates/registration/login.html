@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Sign in" %} · {% trans "Barber CRM" %}{% endblock %}
+
+{% block content %}
+<section class="card auth-card">
+    <h1>{% trans "Welcome back" %}</h1>
+    <p class="muted">{% trans "Sign in to continue to the barbershop system." %}</p>
+    <form method="post" class="stack-form">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        <label for="{{ form.username.id_for_label }}">{% trans "Username" %}</label>
+        {{ form.username }}
+        <label for="{{ form.password.id_for_label }}">{% trans "Password" %}</label>
+        {{ form.password }}
+        <button type="submit" class="btn">{% trans "Sign in" %}</button>
+    </form>
+</section>
+{% endblock %}

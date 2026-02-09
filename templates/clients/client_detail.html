@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{{ client.full_name }} · {% trans "Client" %}{% endblock %}
+
+{% block content %}
+<section class="card">
+    <div class="section-header">
+        <h1>{{ client.full_name }}</h1>
+        <div class="form-actions">
+            <a href="{% url 'appointment-list' %}?scope=all_history&q={{ client.phone|urlencode }}" class="btn">{% trans "Appointments history" %}</a>
+            <a href="{% url 'client-update' client.id %}" class="btn btn-outline">{% trans "Edit client" %}</a>
+        </div>
+    </div>
+    <div class="grid">
+        <article>
+            <h3>{% trans "Phone" %}</h3>
+            <p>{{ client.phone }}</p>
+        </article>
+        <article>
+            <h3>{% trans "Email" %}</h3>
+            <p>{{ client.email|default:"-" }}</p>
+        </article>
+        <article>
+            <h3>{% trans "Preferred drink" %}</h3>
+            <p>{{ client.preferred_drink|default:"-" }}</p>
+        </article>
+        <article>
+            <h3>{% trans "Marketing opt-in" %}</h3>
+            <p>{% if client.marketing_opt_in %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</p>
+        </article>
+        <article>
+            <h3>{% trans "Photo marketing consent" %}</h3>
+            <p>{% if client.photo_marketing_opt_in %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</p>
+        </article>
+    </div>
+</section>
+
+<section class="card" id="client-comments">
+    <h2>{% trans "General comments" %}</h2>
+    <form method="post" action="{% url 'client-comment-create' client.id %}" class="stack-form">
+        {% csrf_token %}
+        {{ comment_form.non_field_errors }}
+        {{ comment_form.comment }}
+        {% if comment_form.comment.errors %}
+            <div class="form-error">{{ comment_form.comment.errors|join:", " }}</div>
+        {% endif %}
+        <button type="submit" class="btn">{% trans "Add comment" %}</button>
+    </form>
+
+    <div class="comment-list">
+        {% if comments %}
+            {% for comment in comments %}
+                <article class="comment-line">
+                    <p>{{ comment.comment }}</p>
+                    <small class="muted">
+                        {{ comment.created_at }} · {{ comment.created_by|default:"-" }}
+                    </small>
+                </article>
+            {% endfor %}
+        {% else %}
+            <p class="muted">{% trans "No comments yet." %}</p>
+        {% endif %}
+    </div>
+</section>
+
+{% endblock %}
