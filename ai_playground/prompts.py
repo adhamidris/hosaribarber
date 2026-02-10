@@ -9,7 +9,22 @@ def build_hair_transformation_prompt(
     normalized_hair_color = (hair_color_name or "").strip()
     normalized_beard_color = (beard_color_name or "").strip()
 
-    primary_goal_instruction = "Apply the hairstyle reference clearly on the selfie person. Do not leave the original hairstyle unchanged."
+    primary_goal_instruction = (
+        "Apply the hairstyle reference clearly on the selfie person. "
+        "Do not leave the original hairstyle unchanged."
+    )
+
+    strict_style_lock_instruction = (
+        "STYLE LOCK (highest priority): treat the hairstyle reference as an exact specification, not inspiration. "
+        "Target at least 99.99% hairstyle fidelity to the reference for cut family, silhouette, parting placement, "
+        "fringe/bangs length and direction, top volume distribution, crown flow, fade/taper transition height, "
+        "sideburn shape, and strand/texture direction."
+    )
+
+    anti_drift_instruction = (
+        "Do not average, simplify, beautify, or improvise hairstyle details. "
+        "Do not output an alternate haircut."
+    )
 
     identity_instruction = (
         "Keep identity and scene unchanged: face, skin tone, body, clothing, background, camera angle, and lighting must stay the same."
@@ -21,6 +36,11 @@ def build_hair_transformation_prompt(
 
     edit_scope_instruction = (
         "Edit only hair and beard areas requested below. Avoid extra edits or beauty filters."
+    )
+
+    verification_instruction = (
+        "Before finalizing, perform a strict reference-check: if any key hairstyle feature does not match the "
+        "reference, revise the hair edit until it matches while preserving identity and the natural hairline."
     )
 
     hair_color_instruction = (
@@ -66,9 +86,12 @@ def build_hair_transformation_prompt(
         part
         for part in (
             primary_goal_instruction,
+            strict_style_lock_instruction,
+            anti_drift_instruction,
             identity_instruction,
             hairline_instruction,
             edit_scope_instruction,
+            verification_instruction,
             hair_color_instruction,
             beard_style_instruction,
             beard_color_instruction,

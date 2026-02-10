@@ -60,7 +60,7 @@ class PlaygroundSessionTests(TestCase):
 
         home_response = self.client.get(reverse("ai-playground-home"))
         self.assertEqual(home_response.status_code, 200)
-        self.assertContains(home_response, "Step 1")
+        self.assertContains(home_response, "Take or Upload a Selfie")
 
     def test_expired_session_is_rejected(self):
         session = PlaygroundSession.objects.create(

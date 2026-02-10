@@ -3,6 +3,16 @@
 
 {% block title %}{% trans "AI Playground" %}{% endblock %}
 
+{% block topbar_subtitle %}
+<p class="ai-playground-topbar-subtitle muted">{% trans "Take a selfie, choose a style, and run a simulated haircut preview." %}</p>
+{% endblock %}
+
+{% block topbar_right %}
+<span class="badge">
+    {% trans "Session expires at" %} {{ active_session.expires_at|date:"Y-m-d H:i" }}
+</span>
+{% endblock %}
+
 {% block content %}
 <section
     id="ai-playground-root"
@@ -31,259 +41,287 @@
     data-msg-generate-failed="{% trans 'Generation request failed.' %}"
     data-msg-generate-started="{% trans 'Request sent. Preparing AI transformation...' %}"
     data-msg-generate-complete="{% trans 'Preview is ready.' %}"
+    data-msg-generate-cta-ready="{% trans 'Generate' %}"
+    data-msg-generate-cta-prompt="{% trans 'Choose a Hair/Beard style to generate' %}"
 >
-    <section class="card ai-playground-card">
-        <div class="section-header">
-            <div>
-                <h1>{% trans "AI Playground" %}</h1>
-                <p class="muted">{% trans "Take a selfie, choose a style, and run a simulated haircut preview." %}</p>
+    <div class="ai-main-layout">
+        <aside id="style-step" class="card ai-playground-card ai-main-side-panel">
+            <div class="ai-side-panel-header">
+                <h2>{% trans "Look Builder" %}</h2>
+                <p class="muted">{% trans "Use the left sidebar to expand Hairstyles and Beards." %}</p>
             </div>
-            <span class="badge">
-                {% trans "Session expires at" %} {{ active_session.expires_at|date:"Y-m-d H:i" }}
-            </span>
-        </div>
-    </section>
+            <div class="ai-look-builder" data-active-builder="hair">
+                <div class="ai-look-nav">
+                    <button
+                        type="button"
+                        class="ai-look-nav-item js-builder-tab is-active"
+                        data-builder-tab="hair"
+                        aria-pressed="true"
+                        aria-expanded="true"
+                        aria-controls="hair-builder-panel"
+                    >
+                        <span class="ai-look-nav-label">{% trans "Hairstyles" %}</span>
+                    </button>
+                    <button
+                        type="button"
+                        class="ai-look-nav-item js-builder-tab"
+                        data-builder-tab="beard"
+                        aria-pressed="false"
+                        aria-expanded="false"
+                        aria-controls="beard-builder-panel"
+                    >
+                        <span class="ai-look-nav-label">{% trans "Beards" %}</span>
+                    </button>
+                </div>
+                <div class="ai-look-workspace">
+                    <section id="hair-builder-panel" class="ai-look-panel" role="region" aria-label="{% trans 'Hairstyles panel' %}">
+                        <header class="ai-look-panel-header">
+                            <h3>{% trans "Hairstyles" %}</h3>
+                        </header>
+                        <div class="ai-look-panel-grid">
+                            <div class="ai-look-style-column">
+                                <div id="hair-style-slider" class="ai-style-grid-scroll" role="listbox" aria-label="{% trans 'Hairstyle options' %}">
+                                    <button
+                                        type="button"
+                                        class="ai-style-option ai-style-option-empty ai-style-option-none-choice js-hair-style-option"
+                                        data-style-id="none"
+                                        data-style-name="{% trans 'No hairstyle change' %}"
+                                        data-style-image-url=""
+                                        aria-label="{% trans 'No hairstyle change' %}"
+                                        aria-pressed="false"
+                                    >
+                                        <span class="ai-style-option-none-sign" aria-hidden="true"></span>
+                                    </button>
+                                    {% for style in styles %}
+                                        <button
+                                            type="button"
+                                            class="ai-style-option js-hair-style-option"
+                                            data-style-id="{{ style.id }}"
+                                            data-style-name="{% if style.name %}{{ style.name }}{% endif %}"
+                                            data-style-image-url="{{ style.image.url }}"
+                                            aria-pressed="false"
+                                        >
+                                            <span class="ai-style-option-media">
+                                                <img
+                                                    src="{{ style.image.url }}"
+                                                    alt="{% if style.name %}{{ style.name }}{% else %}{% trans 'Haircut style reference' %}{% endif %}"
+                                                >
+                                            </span>
+                                            {% if style.name %}
+                                                <span class="ai-style-option-label">{{ style.name }}</span>
+                                            {% endif %}
+                                        </button>
+                                    {% empty %}
+                                        <p class="muted ai-style-empty-state">{% trans "No active hairstyles yet." %}</p>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <div class="ai-look-color-column">
+                                <div id="hair-color-palette" class="ai-color-list-scroll" role="listbox" aria-label="{% trans 'Hair color options' %}">
+                                    <button
+                                        type="button"
+                                        class="ai-color-chip ai-color-chip-none js-hair-color-option"
+                                        data-color-id="none"
+                                        data-color-name="{% trans 'Default' %}"
+                                        aria-pressed="false"
+                                    >
+                                        <span class="ai-color-dot ai-color-dot-none"></span>
+                                        <span>{% trans "Default" %}</span>
+                                    </button>
+                                    {% for color in hair_colors %}
+                                        <button
+                                            type="button"
+                                            class="ai-color-chip js-hair-color-option"
+                                            data-color-id="{{ color.id }}"
+                                            data-color-name="{{ color.name }}"
+                                            aria-pressed="false"
+                                        >
+                                            <span class="ai-color-dot" style="background: {{ color.hex_code }};"></span>
+                                            <span>{{ color.name }}</span>
+                                        </button>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    </section>
 
-    <section id="selfie-step" class="card ai-playground-card">
-        <h2>{% trans "Step 1 · Selfie" %}</h2>
-        <p class="muted">{% trans "Use the camera or upload a clear frontal photo." %}</p>
-        <div id="selfie-input-grid" class="ai-selfie-grid{% if active_session.has_selfie %} hidden{% endif %}">
-            <div class="ai-selfie-pane ai-selfie-pane-media">
-                <button id="camera-selfie-block" type="button" class="camera-selfie-block">
-                    <span class="camera-selfie-icon" aria-hidden="true"></span>
-                    <span class="camera-selfie-label">{% trans "Camera" %}</span>
-                </button>
-                <video id="selfie-video" class="camera-video hidden" autoplay playsinline muted></video>
-            </div>
-            <div class="ai-selfie-pane ai-selfie-pane-upload">
-                <label
-                    id="selfie-upload-zone"
-                    for="selfie-input"
-                    class="upload-zone"
-                    role="button"
-                    tabindex="0"
-                >
-                    <span class="upload-zone-cta">
-                        <span class="upload-zone-mark" aria-hidden="true">+</span>
-                        <span class="upload-zone-title">{% trans "Tap or drop selfie" %}</span>
-                    </span>
-                    <span id="selfie-upload-filename" class="upload-zone-file muted hidden"></span>
-                </label>
-                <input
-                    id="selfie-input"
-                    class="visually-hidden-file"
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    capture="user"
-                >
-            </div>
-        </div>
-        <div id="selfie-preview-block" class="ai-selfie-preview-block{% if not active_session.has_selfie %} hidden{% endif %}">
-            <img
-                id="selfie-preview"
-                class="camera-preview{% if not active_session.selfie_image %} hidden{% endif %}"
-                {% if active_session.selfie_image %}src="{{ active_session.selfie_image.url }}"{% endif %}
-                alt="{% trans 'Saved selfie preview' %}"
-            >
-            <div class="ai-selfie-preview-actions">
-                <button id="selfie-take-photo-btn" type="button" class="btn btn-sm">
-                    {% trans "Take a photo" %}
-                </button>
-                <button id="selfie-replace-btn" type="button" class="btn btn-outline btn-sm">
-                    {% trans "Use another selfie" %}
-                </button>
-            </div>
-        </div>
-        <p id="selfie-status" class="muted{% if active_session.has_selfie %} hidden{% endif %}">
-            {% trans "No selfie selected yet." %}
-        </p>
-    </section>
+                    <section id="beard-builder-panel" class="ai-look-panel hidden" role="region" aria-label="{% trans 'Beards panel' %}">
+                        <header class="ai-look-panel-header">
+                            <h3>{% trans "Beards" %}</h3>
+                        </header>
+                        <div class="ai-look-panel-grid">
+                            <div class="ai-look-style-column">
+                                <div id="beard-style-slider" class="ai-style-grid-scroll" role="listbox" aria-label="{% trans 'Beard style options' %}">
+                                    <button
+                                        type="button"
+                                        class="ai-style-option ai-style-option-empty ai-style-option-none-choice js-beard-style-option"
+                                        data-beard-style-id="none"
+                                        data-beard-style-name="{% trans 'No beard change' %}"
+                                        data-style-image-url=""
+                                        aria-label="{% trans 'No beard change' %}"
+                                        aria-pressed="false"
+                                    >
+                                        <span class="ai-style-option-none-sign" aria-hidden="true"></span>
+                                    </button>
+                                    {% for style in beard_styles %}
+                                        <button
+                                            type="button"
+                                            class="ai-style-option js-beard-style-option"
+                                            data-beard-style-id="{{ style.id }}"
+                                            data-beard-style-name="{% if style.name %}{{ style.name }}{% endif %}"
+                                            data-style-image-url="{{ style.image.url }}"
+                                            aria-pressed="false"
+                                        >
+                                            <span class="ai-style-option-media">
+                                                <img
+                                                    src="{{ style.image.url }}"
+                                                    alt="{% if style.name %}{{ style.name }}{% else %}{% trans 'Beard style reference' %}{% endif %}"
+                                                >
+                                            </span>
+                                            {% if style.name %}
+                                                <span class="ai-style-option-label">{{ style.name }}</span>
+                                            {% endif %}
+                                        </button>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <div class="ai-look-color-column">
+                                <div id="beard-color-palette" class="ai-color-list-scroll" role="listbox" aria-label="{% trans 'Beard color options' %}">
+                                    <button
+                                        type="button"
+                                        class="ai-color-chip ai-color-chip-none js-beard-color-option"
+                                        data-color-id="none"
+                                        data-color-name="{% trans 'Default' %}"
+                                        aria-pressed="false"
+                                    >
+                                        <span class="ai-color-dot ai-color-dot-none"></span>
+                                        <span>{% trans "Default" %}</span>
+                                    </button>
+                                    {% for color in beard_colors %}
+                                        <button
+                                            type="button"
+                                            class="ai-color-chip js-beard-color-option"
+                                            data-color-id="{{ color.id }}"
+                                            data-color-name="{{ color.name }}"
+                                            aria-pressed="false"
+                                        >
+                                            <span class="ai-color-dot" style="background: {{ color.hex_code }};"></span>
+                                            <span>{{ color.name }}</span>
+                                        </button>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    </section>
 
-    <section id="style-step" class="card ai-playground-card">
-        <h2>{% trans "Step 2 · Build Your Look" %}</h2>
-        <p class="muted">{% trans "Choose hairstyle and beard settings, then generate from one action button." %}</p>
-        <div class="ai-style-builder">
-            <aside class="ai-style-builder-panel">
-                <section class="ai-builder-block">
-                    <h3>{% trans "Hairstyle" %}</h3>
-                    <div id="hair-style-slider" class="ai-vertical-style-slider" role="listbox" aria-label="{% trans 'Hairstyle options' %}">
-                        {% for style in styles %}
-                            <button
-                                type="button"
-                                class="ai-style-slider-item js-hair-style-option"
-                                data-style-id="{{ style.id }}"
-                                data-style-name="{% if style.name %}{{ style.name }}{% else %}{% trans 'Haircut style' %} #{{ style.id }}{% endif %}"
-                                data-style-image-url="{{ style.image.url }}"
-                                aria-pressed="false"
-                            >
-                                <img
-                                    src="{{ style.image.url }}"
-                                    alt="{% if style.name %}{{ style.name }}{% else %}{% trans 'Haircut style reference' %}{% endif %}"
-                                >
-                                <span>{% if style.name %}{{ style.name }}{% else %}{% trans "Haircut style" %} #{{ style.id }}{% endif %}</span>
-                            </button>
-                        {% empty %}
-                            <p class="muted ai-style-empty-state">{% trans "No active hairstyles yet." %}</p>
-                        {% endfor %}
-                    </div>
-                </section>
-
-                <section class="ai-builder-block">
-                    <h3>{% trans "Hair Color" %}</h3>
-                    <div id="hair-color-palette" class="ai-color-palette" role="listbox" aria-label="{% trans 'Hair color options' %}">
-                        <button
-                            type="button"
-                            class="ai-color-chip ai-color-chip-none js-hair-color-option"
-                            data-color-id="none"
-                            data-color-name="{% trans 'No color' %}"
-                            aria-pressed="false"
-                        >
-                            <span class="ai-color-dot ai-color-dot-none"></span>
-                            <span>{% trans "No color" %}</span>
-                        </button>
-                        {% for color in hair_colors %}
-                            <button
-                                type="button"
-                                class="ai-color-chip js-hair-color-option"
-                                data-color-id="{{ color.id }}"
-                                data-color-name="{{ color.name }}"
-                                aria-pressed="false"
-                            >
-                                <span class="ai-color-dot" style="background: {{ color.hex_code }};"></span>
-                                <span>{{ color.name }}</span>
-                            </button>
-                        {% endfor %}
-                    </div>
-                </section>
-
-                <section class="ai-builder-block">
-                    <h3>{% trans "Beard Style" %}</h3>
-                    <div id="beard-style-slider" class="ai-vertical-style-slider" role="listbox" aria-label="{% trans 'Beard style options' %}">
-                        <button
-                            type="button"
-                            class="ai-style-slider-item js-beard-style-option ai-style-slider-item-none"
-                            data-beard-style-id="none"
-                            data-beard-style-name="{% trans 'No beard change' %}"
-                            data-style-image-url=""
-                            aria-pressed="false"
-                        >
-                            <span>{% trans "No beard change" %}</span>
-                        </button>
-                        {% for style in beard_styles %}
-                            <button
-                                type="button"
-                                class="ai-style-slider-item js-beard-style-option"
-                                data-beard-style-id="{{ style.id }}"
-                                data-beard-style-name="{% if style.name %}{{ style.name }}{% else %}{% trans 'Beard style' %} #{{ style.id }}{% endif %}"
-                                data-style-image-url="{{ style.image.url }}"
-                                aria-pressed="false"
-                            >
-                                <img
-                                    src="{{ style.image.url }}"
-                                    alt="{% if style.name %}{{ style.name }}{% else %}{% trans 'Beard style reference' %}{% endif %}"
-                                >
-                                <span>{% if style.name %}{{ style.name }}{% else %}{% trans "Beard style" %} #{{ style.id }}{% endif %}</span>
-                            </button>
-                        {% endfor %}
-                    </div>
-                </section>
-
-                <section class="ai-builder-block">
-                    <h3>{% trans "Beard Color" %}</h3>
-                    <div id="beard-color-palette" class="ai-color-palette" role="listbox" aria-label="{% trans 'Beard color options' %}">
-                        <button
-                            type="button"
-                            class="ai-color-chip ai-color-chip-none js-beard-color-option"
-                            data-color-id="none"
-                            data-color-name="{% trans 'No color' %}"
-                            aria-pressed="false"
-                        >
-                            <span class="ai-color-dot ai-color-dot-none"></span>
-                            <span>{% trans "No color" %}</span>
-                        </button>
-                        {% for color in beard_colors %}
-                            <button
-                                type="button"
-                                class="ai-color-chip js-beard-color-option"
-                                data-color-id="{{ color.id }}"
-                                data-color-name="{{ color.name }}"
-                                aria-pressed="false"
-                            >
-                                <span class="ai-color-dot" style="background: {{ color.hex_code }};"></span>
-                                <span>{{ color.name }}</span>
-                            </button>
-                        {% endfor %}
-                    </div>
-                </section>
-
-                <button id="style-generate-btn" type="button" class="btn">{% trans "Generate Style Preview" %}</button>
-            </aside>
-
-            <div class="ai-style-builder-preview">
-                <p id="style-selection-status" class="muted">{% trans "Select all options on the left panel to unlock generation." %}</p>
-                <div class="ai-selected-reference-grid">
-                    <article class="ai-selected-reference-card">
-                        <p class="muted">{% trans "Selected hairstyle" %}</p>
-                        <img id="selected-hair-reference-image" class="hidden" alt="{% trans 'Selected hairstyle reference' %}">
-                        <p id="selected-hair-reference-label" class="muted">{% trans "No hairstyle selected." %}</p>
-                    </article>
-                    <article class="ai-selected-reference-card">
-                        <p class="muted">{% trans "Selected beard style" %}</p>
-                        <img id="selected-beard-reference-image" class="hidden" alt="{% trans 'Selected beard style reference' %}">
-                        <p id="selected-beard-reference-label" class="muted">{% trans "No beard style selected." %}</p>
-                    </article>
+                    <p id="style-selection-status" class="muted ai-selection-status">
+                        {% trans "Choose a hairstyle or beard style, then generate." %}
+                    </p>
                 </div>
             </div>
-        </div>
-    </section>
+        </aside>
 
-    <section class="card ai-playground-card">
-        <h2>{% trans "Step 3 · Generation" %}</h2>
-        <div id="generate-loader" class="ai-generate-loader hidden">
-            <span class="ai-spinner" aria-hidden="true"></span>
-            <span>{% trans "Generating preview..." %}</span>
+        <div class="ai-main-content">
+            <section id="selfie-step" class="card ai-playground-card">
+                <h2>{% trans "Take or Upload a Selfie" %}</h2>
+                <div id="selfie-input-grid" class="ai-selfie-grid{% if active_session.has_selfie %} hidden{% endif %}">
+                    <div class="ai-selfie-pane ai-selfie-pane-media">
+                        <button id="camera-selfie-block" type="button" class="camera-selfie-block">
+                            <span class="camera-selfie-icon" aria-hidden="true"></span>
+                            <span class="camera-selfie-label">{% trans "Camera" %}</span>
+                        </button>
+                        <video id="selfie-video" class="camera-video hidden" autoplay playsinline muted></video>
+                    </div>
+                    <div class="ai-selfie-pane ai-selfie-pane-upload">
+                        <label
+                            id="selfie-upload-zone"
+                            for="selfie-input"
+                            class="upload-zone"
+                            role="button"
+                            tabindex="0"
+                        >
+                            <span class="upload-zone-cta">
+                                <span class="upload-zone-mark" aria-hidden="true">+</span>
+                                <span class="upload-zone-title">{% trans "Tap or drop selfie" %}</span>
+                            </span>
+                            <span id="selfie-upload-filename" class="upload-zone-file muted hidden"></span>
+                        </label>
+                        <input
+                            id="selfie-input"
+                            class="visually-hidden-file"
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            capture="user"
+                        >
+                    </div>
+                </div>
+                <div id="selfie-preview-block" class="ai-selfie-preview-block{% if not active_session.has_selfie %} hidden{% endif %}">
+                    <img
+                        id="selfie-preview"
+                        class="camera-preview{% if not active_session.selfie_image %} hidden{% endif %}"
+                        {% if active_session.selfie_image %}src="{{ active_session.selfie_image.url }}"{% endif %}
+                        alt="{% trans 'Saved selfie preview' %}"
+                    >
+                    <div class="ai-selfie-preview-actions">
+                        <button id="selfie-take-photo-btn" type="button" class="btn btn-sm">
+                            {% trans "Take a photo" %}
+                        </button>
+                        <button id="selfie-replace-btn" type="button" class="btn btn-outline btn-sm">
+                            {% trans "Use another selfie" %}
+                        </button>
+                        <button id="selfie-generate-btn" type="button" class="btn btn-sm">
+                            {% trans "Choose a Hair/Beard style to generate" %}
+                        </button>
+                    </div>
+                </div>
+                <p id="selfie-status" class="muted hidden"></p>
+                <div id="selfie-generation-block" class="ai-selfie-generation-block{% if not active_session.has_selfie %} hidden{% endif %}">
+                    <div id="generate-loader" class="ai-generate-loader hidden">
+                        <span class="ai-spinner" aria-hidden="true"></span>
+                        <span>{% trans "Generating preview..." %}</span>
+                    </div>
+                    <p id="generate-status" class="muted">
+                        {% if latest_generation %}
+                            {% trans "Latest generated preview restored for this session." %}
+                        {% endif %}
+                    </p>
+                    <div id="generated-result-block" class="ai-selfie-preview-block{% if not latest_generation %} hidden{% endif %}">
+                        <img
+                            id="generated-result-image"
+                            class="camera-preview{% if not latest_generation %} hidden{% endif %}"
+                            {% if latest_generation %}src="{{ latest_generation.result_image.url }}"{% endif %}
+                            alt="{% trans 'Generated haircut preview' %}"
+                        >
+                    </div>
+                    <ul id="generation-log" class="ai-generation-log">
+                        {% for generation in recent_generations %}
+                            <li>
+                                {% if generation.style and generation.style.name %}
+                                    {{ generation.style.name }}
+                                {% elif generation.style %}
+                                    {% trans "Curated style" %}
+                                {% else %}
+                                    {% trans "Custom style" %}
+                                {% endif %}
+                                {% if generation.hair_color_option %}
+                                    · {{ generation.hair_color_option.name }}
+                                {% endif %}
+                                {% if generation.beard_style and generation.beard_style.name %}
+                                    · {{ generation.beard_style.name }}
+                                {% elif generation.beard_style %}
+                                    · {% trans "Beard style" %}
+                                {% endif %}
+                                {% if generation.beard_color_option %}
+                                    · {{ generation.beard_color_option.name }}
+                                {% endif %}
+                                · #{{ generation.id }} · {{ generation.status }} · {{ generation.provider|default:"unknown" }}{% if generation.processing_ms %} · {{ generation.processing_ms }}ms{% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </section>
         </div>
-        <p id="generate-status" class="muted">
-            {% if latest_generation %}
-                {% trans "Latest generated preview restored for this session." %}
-            {% else %}
-                {% trans "Waiting for a style selection." %}
-            {% endif %}
-        </p>
-        <div id="generated-result-block" class="ai-selfie-preview-block{% if not latest_generation %} hidden{% endif %}">
-            <img
-                id="generated-result-image"
-                class="camera-preview{% if not latest_generation %} hidden{% endif %}"
-                {% if latest_generation %}src="{{ latest_generation.result_image.url }}"{% endif %}
-                alt="{% trans 'Generated haircut preview' %}"
-            >
-        </div>
-        <ul id="generation-log" class="ai-generation-log">
-            {% for generation in recent_generations %}
-                <li>
-                    {% if generation.style and generation.style.name %}
-                        {{ generation.style.name }}
-                    {% elif generation.style %}
-                        {% trans "Curated style" %}
-                    {% else %}
-                        {% trans "Custom style" %}
-                    {% endif %}
-                    {% if generation.hair_color_option %}
-                        · {{ generation.hair_color_option.name }}
-                    {% endif %}
-                    {% if generation.beard_style and generation.beard_style.name %}
-                        · {{ generation.beard_style.name }}
-                    {% elif generation.beard_style %}
-                        · {% trans "Beard style" %}
-                    {% endif %}
-                    {% if generation.beard_color_option %}
-                        · {{ generation.beard_color_option.name }}
-                    {% endif %}
-                    · #{{ generation.id }} · {{ generation.status }} · {{ generation.provider|default:"unknown" }}{% if generation.processing_ms %} · {{ generation.processing_ms }}ms{% endif %}
-                </li>
-            {% endfor %}
-        </ul>
-    </section>
+    </div>
 </section>
 {% endblock %}
 

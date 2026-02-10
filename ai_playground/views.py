@@ -417,6 +417,7 @@ def generate_preview(request: HttpRequest):
     hair_color_value, has_hair_color_choice = _parse_choice_value(request.POST.get("hair_color_option_id", ""))
     beard_style_value, has_beard_style_choice = _parse_choice_value(request.POST.get("beard_style_id", ""))
     beard_color_value, has_beard_color_choice = _parse_choice_value(request.POST.get("beard_color_option_id", ""))
+    normalized_beard_style = beard_style_value.lower()
 
     if not has_hair_color_choice:
         return JsonResponse({"ok": False, "error": "Choose a hair color option first."}, status=400)
@@ -430,9 +431,10 @@ def generate_preview(request: HttpRequest):
             {"ok": False, "error": "Choose either a curated style or upload a custom style, not both."},
             status=400,
         )
-    if not style_id_value and not custom_style_image:
+    has_beard_style_change = has_beard_style_choice and normalized_beard_style != NONE_SELECTION_VALUE
+    if not style_id_value and not custom_style_image and not has_beard_style_change:
         return JsonResponse(
-            {"ok": False, "error": "Select a hairstyle or upload a custom haircut image."},
+            {"ok": False, "error": "Select a hairstyle, a beard style, or upload a custom haircut image."},
             status=400,
         )
 
@@ -461,7 +463,6 @@ def generate_preview(request: HttpRequest):
         if hair_color_option is None:
             return JsonResponse({"ok": False, "error": "Selected hair color is unavailable."}, status=404)
 
-    normalized_beard_style = beard_style_value.lower()
     if normalized_beard_style != NONE_SELECTION_VALUE:
         try:
             beard_style_id = int(beard_style_value)
@@ -633,11 +634,13 @@ def generate_preview(request: HttpRequest):
 
     started = perf_counter()
     try:
-        reference_path = (
-            style.image.path
-            if style is not None
-            else generation.custom_style_image.path
-        )
+        if style is not None:
+            reference_path = style.image.path
+        elif generation.custom_style_image:
+            reference_path = generation.custom_style_image.path
+        else:
+            # Beard-only generation: use selfie as a neutral hair reference.
+            reference_path = generation.selfie_image.path
         beard_reference_path = beard_style.image.path if beard_style is not None else None
         provider_result = generate_hair_preview(
             selfie_path=generation.selfie_image.path,

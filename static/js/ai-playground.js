@@ -34,6 +34,9 @@
     generateFailed: root.dataset.msgGenerateFailed || "Generation request failed.",
     generateStarted: root.dataset.msgGenerateStarted || "Generating preview...",
     generateComplete: root.dataset.msgGenerateComplete || "Preview is ready.",
+    generateCtaReady: root.dataset.msgGenerateCtaReady || "Generate",
+    generateCtaPrompt:
+      root.dataset.msgGenerateCtaPrompt || "Choose a Hair/Beard style to generate",
   };
 
   const selfieStep = document.getElementById("selfie-step");
@@ -46,22 +49,21 @@
   const cameraSelfieBlock = document.getElementById("camera-selfie-block");
   const selfieTakePhotoBtn = document.getElementById("selfie-take-photo-btn");
   const selfieReplaceBtn = document.getElementById("selfie-replace-btn");
+  const selfieGenerateBtn = document.getElementById("selfie-generate-btn");
   const selfieInput = document.getElementById("selfie-input");
   const selfieUploadZone = document.getElementById("selfie-upload-zone");
   const selfieUploadFilename = document.getElementById("selfie-upload-filename");
+  const selfieGenerationBlock = document.getElementById("selfie-generation-block");
   const hairStyleOptions = Array.from(root.querySelectorAll(".js-hair-style-option"));
   const hairColorOptions = Array.from(root.querySelectorAll(".js-hair-color-option"));
   const beardStyleOptions = Array.from(root.querySelectorAll(".js-beard-style-option"));
   const beardColorOptions = Array.from(root.querySelectorAll(".js-beard-color-option"));
-  const styleGenerateBtn = document.getElementById("style-generate-btn");
+  const lookBuilder = root.querySelector(".ai-look-builder");
+  const builderTabs = Array.from(root.querySelectorAll(".js-builder-tab"));
+  const hairBuilderPanel = document.getElementById("hair-builder-panel");
+  const beardBuilderPanel = document.getElementById("beard-builder-panel");
   const styleSelectionStatus = document.getElementById("style-selection-status");
   const defaultSelectionStatusText = (styleSelectionStatus?.textContent || "").trim();
-  const selectedHairReferenceImage = document.getElementById("selected-hair-reference-image");
-  const selectedHairReferenceLabel = document.getElementById("selected-hair-reference-label");
-  const selectedBeardReferenceImage = document.getElementById("selected-beard-reference-image");
-  const selectedBeardReferenceLabel = document.getElementById("selected-beard-reference-label");
-  const defaultHairReferenceLabel = (selectedHairReferenceLabel?.textContent || "No hairstyle selected.").trim();
-  const defaultBeardReferenceLabel = (selectedBeardReferenceLabel?.textContent || "No beard style selected.").trim();
   const generateLoader = document.getElementById("generate-loader");
   const generateStatus = document.getElementById("generate-status");
   const generatedResultBlock = document.getElementById("generated-result-block");
@@ -74,12 +76,10 @@
   let selfieIsSaved = Boolean(initialSelfieUrl);
   let selectedHairStyleId = "";
   let selectedHairStyleName = "";
-  let selectedHairStyleImageUrl = "";
   let selectedHairColorId = "";
   let selectedHairColorName = "";
   let selectedBeardStyleId = "";
   let selectedBeardStyleName = "";
-  let selectedBeardStyleImageUrl = "";
   let selectedBeardColorId = "";
   let selectedBeardColorName = "";
   let cameraStream = null;
@@ -208,14 +208,13 @@
       styleStep.setAttribute("aria-disabled", enabled ? "false" : "true");
     }
     const isDisabled = !enabled || isGenerating;
-    [...hairStyleOptions, ...hairColorOptions, ...beardStyleOptions, ...beardColorOptions].forEach((button) => {
-      button.disabled = isDisabled;
-      button.setAttribute("aria-disabled", isDisabled ? "true" : "false");
-    });
-    if (styleGenerateBtn) {
-      styleGenerateBtn.disabled = isDisabled;
-      styleGenerateBtn.setAttribute("aria-disabled", isDisabled ? "true" : "false");
-    }
+    [...hairStyleOptions, ...hairColorOptions, ...beardStyleOptions, ...beardColorOptions, ...builderTabs].forEach(
+      (button) => {
+        button.disabled = isDisabled;
+        button.setAttribute("aria-disabled", isDisabled ? "true" : "false");
+      }
+    );
+    updateGenerateActionCta();
   }
 
   function setPressedState(options, selectedValue, valueKey) {
@@ -225,18 +224,28 @@
     });
   }
 
-  function setSelectedReference(imageEl, labelEl, imageUrl, labelText, emptyLabel) {
-    if (imageEl) {
-      imageEl.classList.toggle("hidden", !imageUrl);
-      imageEl.src = imageUrl || "";
+  function switchBuilderTab(tabKey) {
+    if (lookBuilder) {
+      lookBuilder.dataset.activeBuilder = tabKey;
     }
-    if (labelEl) {
-      labelEl.textContent = labelText || emptyLabel;
+    builderTabs.forEach((tab) => {
+      const isActive = tab.dataset.builderTab === tabKey;
+      tab.classList.toggle("is-active", isActive);
+      tab.setAttribute("aria-pressed", isActive ? "true" : "false");
+      tab.setAttribute("aria-expanded", isActive ? "true" : "false");
+    });
+    if (hairBuilderPanel) {
+      hairBuilderPanel.classList.toggle("hidden", tabKey !== "hair");
+    }
+    if (beardBuilderPanel) {
+      beardBuilderPanel.classList.toggle("hidden", tabKey !== "beard");
     }
   }
 
   function getSelectionErrorMessage() {
-    if (!selectedHairStyleId) return messages.hairStyleRequired;
+    const hasHairStyle = Boolean(selectedHairStyleId && selectedHairStyleId !== "none");
+    const hasBeardStyleChange = Boolean(selectedBeardStyleId && selectedBeardStyleId !== "none");
+    if (!hasHairStyle && !hasBeardStyleChange) return messages.generateCtaPrompt;
     if (!selectedHairColorId) return messages.hairColorRequired;
     if (!selectedBeardStyleId) return messages.beardStyleRequired;
     if (!selectedBeardColorId) return messages.beardColorRequired;
@@ -246,21 +255,44 @@
     return "";
   }
 
+  function hasChosenLookStyle() {
+    return Boolean(selectedHairStyleId && selectedHairStyleId !== "none") || Boolean(selectedBeardStyleId && selectedBeardStyleId !== "none");
+  }
+
+  function updateGenerateActionCta() {
+    if (!selfieGenerateBtn) return;
+    const hasStyleSelection = hasChosenLookStyle();
+    const label = hasStyleSelection ? messages.generateCtaReady : messages.generateCtaPrompt;
+    selfieGenerateBtn.textContent = label;
+    const disabled = !hasSelfie || isGenerating || isSelfieUploading || !hasStyleSelection;
+    selfieGenerateBtn.disabled = disabled;
+    selfieGenerateBtn.setAttribute("aria-disabled", disabled ? "true" : "false");
+    selfieGenerateBtn.classList.toggle("btn-outline", !hasStyleSelection);
+  }
+
   function updateSelectionStatus() {
-    if (!styleSelectionStatus) return;
+    if (!styleSelectionStatus) {
+      updateGenerateActionCta();
+      return;
+    }
     const errorMessage = getSelectionErrorMessage();
     if (errorMessage) {
       styleSelectionStatus.textContent =
         defaultSelectionStatusText || "Select hairstyle, hair color, beard style, and beard color.";
       styleSelectionStatus.classList.remove("warning-text");
+      updateGenerateActionCta();
       return;
     }
+    const hairSummary = selectedHairStyleId && selectedHairStyleId !== "none"
+      ? `${selectedHairStyleName || "Hairstyle"} · ${selectedHairColorName || "Default"}`
+      : "No haircut change";
     const beardSummary =
       selectedBeardStyleId === "none"
         ? "No beard change"
-        : `${selectedBeardStyleName || "Beard"} · ${selectedBeardColorName || "No color"}`;
-    styleSelectionStatus.textContent = `${selectedHairStyleName || "Hairstyle"} · ${selectedHairColorName || "No color"} · ${beardSummary}`;
+        : `${selectedBeardStyleName || "Beard"} · ${selectedBeardColorName || "Default"}`;
+    styleSelectionStatus.textContent = `${hairSummary} · ${beardSummary}`;
     styleSelectionStatus.classList.remove("warning-text");
+    updateGenerateActionCta();
   }
 
   function syncSelfieMode() {
@@ -274,6 +306,10 @@
     if (hasSavedPreview) {
       setSelfiePreview(savedSelfieUrl);
     }
+    if (selfieGenerationBlock) {
+      selfieGenerationBlock.classList.toggle("hidden", !hasSavedPreview);
+    }
+    updateGenerateActionCta();
   }
 
   function guideToSelfieStep() {
@@ -336,6 +372,7 @@
       if (isSelfieUploading) setDropzoneActive(selfieUploadZone, false);
     }
     applySelfieZoneState();
+    updateGenerateActionCta();
   }
 
   function stopCamera() {
@@ -598,15 +635,7 @@
   function handleHairStyleSelection(button) {
     selectedHairStyleId = button.dataset.styleId || "";
     selectedHairStyleName = button.dataset.styleName || "";
-    selectedHairStyleImageUrl = button.dataset.styleImageUrl || "";
     setPressedState(hairStyleOptions, selectedHairStyleId, "styleId");
-    setSelectedReference(
-      selectedHairReferenceImage,
-      selectedHairReferenceLabel,
-      selectedHairStyleImageUrl,
-      selectedHairStyleName,
-      defaultHairReferenceLabel
-    );
     updateSelectionStatus();
   }
 
@@ -620,21 +649,13 @@
   function handleBeardStyleSelection(button) {
     selectedBeardStyleId = button.dataset.beardStyleId || "";
     selectedBeardStyleName = button.dataset.beardStyleName || "";
-    selectedBeardStyleImageUrl = button.dataset.styleImageUrl || "";
     if (selectedBeardStyleId === "none" && selectedBeardColorId && selectedBeardColorId !== "none") {
       const noneColorOption = beardColorOptions.find((option) => option.dataset.colorId === "none");
       selectedBeardColorId = "none";
-      selectedBeardColorName = noneColorOption?.dataset.colorName || "No color";
+      selectedBeardColorName = noneColorOption?.dataset.colorName || "Default";
       setPressedState(beardColorOptions, selectedBeardColorId, "colorId");
     }
     setPressedState(beardStyleOptions, selectedBeardStyleId, "beardStyleId");
-    setSelectedReference(
-      selectedBeardReferenceImage,
-      selectedBeardReferenceLabel,
-      selectedBeardStyleId === "none" ? "" : selectedBeardStyleImageUrl,
-      selectedBeardStyleName,
-      defaultBeardReferenceLabel
-    );
     updateSelectionStatus();
   }
 
@@ -643,6 +664,36 @@
     selectedBeardColorName = button.dataset.colorName || "";
     setPressedState(beardColorOptions, selectedBeardColorId, "colorId");
     updateSelectionStatus();
+  }
+
+  function initializeDefaultSelections() {
+    const defaultHairStyle = hairStyleOptions.find((option) => option.dataset.styleId === "none");
+    if (defaultHairStyle) {
+      selectedHairStyleId = defaultHairStyle.dataset.styleId || "";
+      selectedHairStyleName = defaultHairStyle.dataset.styleName || "Default";
+      setPressedState(hairStyleOptions, selectedHairStyleId, "styleId");
+    }
+
+    const defaultHairColor = hairColorOptions.find((option) => option.dataset.colorId === "none");
+    if (defaultHairColor) {
+      selectedHairColorId = defaultHairColor.dataset.colorId || "";
+      selectedHairColorName = defaultHairColor.dataset.colorName || "Default";
+      setPressedState(hairColorOptions, selectedHairColorId, "colorId");
+    }
+
+    const defaultBeardStyle = beardStyleOptions.find((option) => option.dataset.beardStyleId === "none");
+    if (defaultBeardStyle) {
+      selectedBeardStyleId = defaultBeardStyle.dataset.beardStyleId || "";
+      selectedBeardStyleName = defaultBeardStyle.dataset.beardStyleName || "Default";
+      setPressedState(beardStyleOptions, selectedBeardStyleId, "beardStyleId");
+    }
+
+    const defaultBeardColor = beardColorOptions.find((option) => option.dataset.colorId === "none");
+    if (defaultBeardColor) {
+      selectedBeardColorId = defaultBeardColor.dataset.colorId || "";
+      selectedBeardColorName = defaultBeardColor.dataset.colorName || "Default";
+      setPressedState(beardColorOptions, selectedBeardColorId, "colorId");
+    }
   }
 
   hairStyleOptions.forEach((button) => {
@@ -661,34 +712,56 @@
     button.addEventListener("click", () => handleBeardColorSelection(button));
   });
 
-  if (styleGenerateBtn) {
-    styleGenerateBtn.addEventListener("click", async () => {
-      if (!hasSelfie) {
-        setGenerateStatus(messages.selfieRequired, true);
-        guideToSelfieStep();
-        return;
+  builderTabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const tabKey = tab.dataset.builderTab;
+      if (!tabKey) return;
+      switchBuilderTab(tabKey);
+    });
+  });
+
+  async function triggerGenerationRequest() {
+    if (!hasSelfie) {
+      setGenerateStatus(messages.selfieRequired, true);
+      guideToSelfieStep();
+      return;
+    }
+
+    if (!hasChosenLookStyle()) {
+      setGenerateStatus(messages.generateCtaPrompt, true);
+      styleStep?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+
+    const validationError = getSelectionErrorMessage();
+    if (validationError) {
+      setGenerateStatus(validationError, true);
+      if (styleSelectionStatus) {
+        styleSelectionStatus.textContent = validationError;
+        styleSelectionStatus.classList.add("warning-text");
       }
+      styleStep?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
 
-      const validationError = getSelectionErrorMessage();
-      if (validationError) {
-        setGenerateStatus(validationError, true);
-        if (styleSelectionStatus) {
-          styleSelectionStatus.textContent = validationError;
-          styleSelectionStatus.classList.add("warning-text");
-        }
-        styleStep?.scrollIntoView({ behavior: "smooth", block: "center" });
-        return;
-      }
+    const formData = new FormData();
+    formData.append("style_id", selectedHairStyleId === "none" ? "" : selectedHairStyleId);
+    formData.append("hair_color_option_id", selectedHairColorId);
+    formData.append("beard_style_id", selectedBeardStyleId);
+    formData.append("beard_color_option_id", selectedBeardColorId);
 
-      const formData = new FormData();
-      formData.append("style_id", selectedHairStyleId);
-      formData.append("hair_color_option_id", selectedHairColorId);
-      formData.append("beard_style_id", selectedBeardStyleId);
-      formData.append("beard_color_option_id", selectedBeardColorId);
+    const hairLabel =
+      selectedHairStyleId && selectedHairStyleId !== "none"
+        ? selectedHairStyleName || "Hairstyle"
+        : "No haircut change";
+    const beardLabel = selectedBeardStyleId === "none" ? "No beard change" : selectedBeardStyleName || "Beard style";
+    const sourceLabel = `${hairLabel} · ${selectedHairColorName || "Default"} · ${beardLabel} · ${selectedBeardColorName || "Default"}`;
+    await submitGeneration(formData, sourceLabel);
+  }
 
-      const beardLabel = selectedBeardStyleId === "none" ? "No beard change" : selectedBeardStyleName;
-      const sourceLabel = `${selectedHairStyleName} · ${selectedHairColorName} · ${beardLabel} · ${selectedBeardColorName}`;
-      await submitGeneration(formData, sourceLabel);
+  if (selfieGenerateBtn) {
+    selfieGenerateBtn.addEventListener("click", async () => {
+      await triggerGenerationRequest();
     });
   }
 
@@ -703,23 +776,11 @@
   });
 
   setUploadFilename(selfieUploadFilename, "");
+  initializeDefaultSelections();
   applySelfieZoneState();
   syncSelfieMode();
+  switchBuilderTab("hair");
   setStyleStepEnabled(true);
   updateSelfieControls();
-  setSelectedReference(
-    selectedHairReferenceImage,
-    selectedHairReferenceLabel,
-    "",
-    "",
-    defaultHairReferenceLabel
-  );
-  setSelectedReference(
-    selectedBeardReferenceImage,
-    selectedBeardReferenceLabel,
-    "",
-    "",
-    defaultBeardReferenceLabel
-  );
   updateSelectionStatus();
 })();

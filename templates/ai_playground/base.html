@@ -11,10 +11,16 @@
 </head>
 <body class="ai-playground-body">
     <header class="ai-playground-topbar">
-        <a class="brand" href="{% url 'ai-playground-home' %}">
-            <img src="{% static 'brand/white-logo.webp' %}" alt="{% trans 'Brand Logo' %}">
-            <span>{% trans "AI Playground" %}</span>
-        </a>
+        <div class="ai-playground-topbar-left">
+            <a class="brand" href="{% url 'ai-playground-home' %}">
+                <img src="{% static 'brand/white-logo.webp' %}" alt="{% trans 'Brand Logo' %}">
+                <span>{% trans "AI Playground" %}</span>
+            </a>
+            {% block topbar_subtitle %}{% endblock %}
+        </div>
+        <div class="ai-playground-topbar-right">
+            {% block topbar_right %}{% endblock %}
+        </div>
     </header>
     <main class="page ai-playground-page">
         {% block content %}{% endblock %}
