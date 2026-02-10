@@ -1,6 +1,8 @@
 from django.contrib import admin
 
 from .models import (
+    PlaygroundBeardStyle,
+    PlaygroundColorOption,
     PlaygroundGeneration,
     PlaygroundRateLimitEvent,
     PlaygroundSession,
@@ -14,6 +16,22 @@ class PlaygroundStyleAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
     search_fields = ("name",)
     ordering = ("sort_order", "id")
+
+
+@admin.register(PlaygroundBeardStyle)
+class PlaygroundBeardStyleAdmin(admin.ModelAdmin):
+    list_display = ("name", "is_active", "sort_order", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("name",)
+    ordering = ("sort_order", "id")
+
+
+@admin.register(PlaygroundColorOption)
+class PlaygroundColorOptionAdmin(admin.ModelAdmin):
+    list_display = ("name", "hex_code", "scope", "is_active", "sort_order", "updated_at")
+    list_filter = ("scope", "is_active")
+    search_fields = ("name", "hex_code")
+    ordering = ("scope", "sort_order", "id")
 
 
 @admin.register(PlaygroundSession)
@@ -44,7 +62,17 @@ class PlaygroundSessionAdmin(admin.ModelAdmin):
 
 @admin.register(PlaygroundGeneration)
 class PlaygroundGenerationAdmin(admin.ModelAdmin):
-    list_display = ("id", "session_id", "status", "provider", "created_at")
+    list_display = (
+        "id",
+        "session_id",
+        "status",
+        "provider",
+        "style",
+        "beard_style",
+        "hair_color_option",
+        "beard_color_option",
+        "created_at",
+    )
     list_filter = ("status", "provider")
     search_fields = ("id", "session__token", "error_message")
     readonly_fields = ("created_at", "updated_at")

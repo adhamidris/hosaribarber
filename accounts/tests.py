@@ -41,7 +41,7 @@ class PermissionToggleTests(TestCase):
 
 class LanguageSwitchTests(TestCase):
     def setUp(self):
-        translation.activate("ar")
+        translation.activate("en")
         self.user = User.objects.create_user(
             username="lang-user",
             password="pass12345",
@@ -52,7 +52,10 @@ class LanguageSwitchTests(TestCase):
     def tearDown(self):
         translation.deactivate_all()
 
-    def test_switch_to_english_redirects_to_prefixed_url(self):
+    def test_new_users_default_to_english(self):
+        self.assertEqual(self.user.preferred_language, "en")
+
+    def test_switch_to_english_redirects_to_unprefixed_url(self):
         response = self.client.post(
             reverse("switch-language"),
             {
@@ -61,11 +64,11 @@ class LanguageSwitchTests(TestCase):
             },
         )
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], "/en/dashboard/")
+        self.assertEqual(response["Location"], "/dashboard/")
         self.user.refresh_from_db()
         self.assertEqual(self.user.preferred_language, "en")
 
-    def test_switch_back_to_arabic_redirects_to_unprefixed_url(self):
+    def test_switch_to_arabic_redirects_to_prefixed_url(self):
         self.user.preferred_language = "en"
         self.user.save(update_fields=["preferred_language"])
 
@@ -76,18 +79,18 @@ class LanguageSwitchTests(TestCase):
             switch_url,
             {
                 "language": "ar",
-                "next": "/en/dashboard/",
+                "next": "/dashboard/",
             },
         )
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], "/dashboard/")
+        self.assertEqual(response["Location"], "/ar/dashboard/")
         self.user.refresh_from_db()
         self.assertEqual(self.user.preferred_language, "ar")
 
-    def test_non_prefixed_page_auto_redirects_for_english_user(self):
-        self.user.preferred_language = "en"
+    def test_non_prefixed_page_auto_redirects_for_arabic_user(self):
+        self.user.preferred_language = "ar"
         self.user.save(update_fields=["preferred_language"])
 
         response = self.client.get("/dashboard/")
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], "/en/dashboard/")
+        self.assertEqual(response["Location"], "/ar/dashboard/")

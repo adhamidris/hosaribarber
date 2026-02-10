@@ -1,6 +1,8 @@
 import base64
+from contextlib import ExitStack
 import io
 import json
+import logging
 import mimetypes
 from dataclasses import dataclass
 from typing import Any
@@ -25,6 +27,32 @@ class PlaygroundImageResult:
     provider: str
 
 
+@dataclass(frozen=True)
+class GeminiUsageMetrics:
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+
+
+@dataclass(frozen=True)
+class GeminiTokenPricing:
+    input_cost_per_1m_tokens: float
+    output_cost_per_1m_tokens: float
+
+
+NANOBANANA_USAGE_LOGGER = logging.getLogger("ai_playground.nanobanana.usage")
+NANOBANANA_MODEL_PRICING: dict[str, GeminiTokenPricing] = {
+    "gemini-2.5-flash-image": GeminiTokenPricing(
+        input_cost_per_1m_tokens=0.30,
+        output_cost_per_1m_tokens=30.00,
+    ),
+    "gemini-3-pro-image-preview": GeminiTokenPricing(
+        input_cost_per_1m_tokens=2.00,
+        output_cost_per_1m_tokens=120.00,
+    ),
+}
+
+
 def configured_provider_name() -> str:
     return str(getattr(settings, "AI_PLAYGROUND_PROVIDER", "stub")).strip().lower() or "stub"
 
@@ -33,10 +61,21 @@ def generate_hair_preview(
     *,
     selfie_path: str,
     reference_path: str,
+    beard_reference_path: str | None = None,
+    hair_color_name: str = "",
+    beard_color_name: str = "",
+    apply_beard_edit: bool = False,
 ) -> PlaygroundImageResult:
     provider_name = configured_provider_name()
     provider = _provider_factory(provider_name)
-    return provider.generate(selfie_path=selfie_path, reference_path=reference_path)
+    return provider.generate(
+        selfie_path=selfie_path,
+        reference_path=reference_path,
+        beard_reference_path=beard_reference_path,
+        hair_color_name=hair_color_name,
+        beard_color_name=beard_color_name,
+        apply_beard_edit=apply_beard_edit,
+    )
 
 
 def _provider_factory(provider_name: str):
@@ -106,6 +145,130 @@ def _decode_base64_payload(raw_value: str) -> bytes:
         raise PlaygroundProviderError("Provider returned invalid base64 image payload.") from error
 
 
+def _safe_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _normalize_model_id(model_name: str) -> str:
+    normalized = str(model_name or "").strip().lower()
+    if "/" in normalized:
+        normalized = normalized.split("/")[-1]
+    return normalized
+
+
+def _nanobanana_model_pricing(model_name: str) -> GeminiTokenPricing | None:
+    normalized_model = _normalize_model_id(model_name)
+    for model_prefix, pricing in NANOBANANA_MODEL_PRICING.items():
+        if normalized_model == model_prefix or normalized_model.startswith(f"{model_prefix}-"):
+            return pricing
+    return None
+
+
+def _extract_gemini_usage_metrics(payload: dict[str, Any]) -> GeminiUsageMetrics:
+    usage = payload.get("usageMetadata")
+    if usage is None:
+        usage = payload.get("usage_metadata")
+    if not isinstance(usage, dict):
+        return GeminiUsageMetrics(prompt_tokens=None, completion_tokens=None, total_tokens=None)
+
+    prompt_tokens = _safe_int(
+        _first_present(
+            usage.get("promptTokenCount"),
+            usage.get("prompt_token_count"),
+        )
+    )
+    completion_tokens = _safe_int(
+        _first_present(
+            usage.get("candidatesTokenCount"),
+            usage.get("candidates_token_count"),
+            usage.get("outputTokenCount"),
+            usage.get("output_token_count"),
+        )
+    )
+    total_tokens = _safe_int(
+        _first_present(
+            usage.get("totalTokenCount"),
+            usage.get("total_token_count"),
+        )
+    )
+    if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
+        total_tokens = prompt_tokens + completion_tokens
+    return GeminiUsageMetrics(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+    )
+
+
+def _estimate_nanobanana_cost_usd(
+    *,
+    usage: GeminiUsageMetrics,
+    input_cost_per_1m_tokens: float,
+    output_cost_per_1m_tokens: float,
+) -> float | None:
+    input_rate = max(0.0, float(input_cost_per_1m_tokens))
+    output_rate = max(0.0, float(output_cost_per_1m_tokens))
+    has_input_rate = input_rate > 0
+    has_output_rate = output_rate > 0
+
+    if usage.prompt_tokens is not None and usage.completion_tokens is not None and (has_input_rate or has_output_rate):
+        return ((usage.prompt_tokens * input_rate) + (usage.completion_tokens * output_rate)) / 1_000_000
+
+    if usage.total_tokens is not None:
+        if has_input_rate and has_output_rate:
+            average_rate = (input_rate + output_rate) / 2
+            return (usage.total_tokens * average_rate) / 1_000_000
+        if has_input_rate:
+            return (usage.total_tokens * input_rate) / 1_000_000
+        if has_output_rate:
+            return (usage.total_tokens * output_rate) / 1_000_000
+
+    return None
+
+
+def _log_nanobanana_usage(
+    *,
+    model: str,
+    usage: GeminiUsageMetrics,
+    estimated_cost_usd: float | None,
+) -> None:
+    prompt_value = "unknown" if usage.prompt_tokens is None else str(usage.prompt_tokens)
+    completion_value = "unknown" if usage.completion_tokens is None else str(usage.completion_tokens)
+    total_value = "unknown" if usage.total_tokens is None else str(usage.total_tokens)
+    cost_value = "unknown" if estimated_cost_usd is None else f"{estimated_cost_usd:.8f}"
+    NANOBANANA_USAGE_LOGGER.info(
+        "nanobanana_usage model=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s estimated_cost_usd=%s",
+        model,
+        prompt_value,
+        completion_value,
+        total_value,
+        cost_value,
+    )
+
+
 def _extract_gemini_image(payload: dict[str, Any]) -> tuple[bytes, str]:
     candidates = payload.get("candidates", [])
     for candidate in candidates:
@@ -138,21 +301,24 @@ def _extract_grok_image(payload: dict[str, Any], timeout_seconds: int) -> tuple[
     raise PlaygroundProviderError("Grok provider returned no image output.")
 
 
-def _build_composite_reference(selfie_path: str, reference_path: str) -> bytes:
-    with Image.open(selfie_path) as selfie_raw, Image.open(reference_path) as reference_raw:
-        selfie = selfie_raw.convert("RGB")
-        reference = reference_raw.convert("RGB")
+def _build_composite_reference(selfie_path: str, reference_paths: list[str]) -> bytes:
+    panel_paths = [selfie_path, *reference_paths]
+    with ExitStack() as stack:
+        raw_images = [stack.enter_context(Image.open(path)) for path in panel_paths]
+        converted = [image.convert("RGB") for image in raw_images]
+        heights = [img.height for img in converted]
+        target_height = min(max(heights), 1024)
+        resized_images = []
+        for image in converted:
+            width = max(1, int(image.width * target_height / max(image.height, 1)))
+            resized_images.append(image.resize((width, target_height), Image.Resampling.LANCZOS))
 
-        target_height = min(max(selfie.height, reference.height), 1024)
-        selfie_width = max(1, int(selfie.width * target_height / max(selfie.height, 1)))
-        ref_width = max(1, int(reference.width * target_height / max(reference.height, 1)))
-
-        selfie_resized = selfie.resize((selfie_width, target_height), Image.Resampling.LANCZOS)
-        reference_resized = reference.resize((ref_width, target_height), Image.Resampling.LANCZOS)
-
-        composed = Image.new("RGB", (selfie_width + ref_width, target_height), color=(245, 245, 245))
-        composed.paste(selfie_resized, (0, 0))
-        composed.paste(reference_resized, (selfie_width, 0))
+        total_width = sum(image.width for image in resized_images)
+        composed = Image.new("RGB", (total_width, target_height), color=(245, 245, 245))
+        x_offset = 0
+        for image in resized_images:
+            composed.paste(image, (x_offset, 0))
+            x_offset += image.width
 
         buffer = io.BytesIO()
         composed.save(buffer, format="JPEG", quality=93)
@@ -162,7 +328,17 @@ def _build_composite_reference(selfie_path: str, reference_path: str) -> bytes:
 class StubProvider:
     provider = "stub"
 
-    def generate(self, *, selfie_path: str, reference_path: str) -> PlaygroundImageResult:
+    def generate(
+        self,
+        *,
+        selfie_path: str,
+        reference_path: str,
+        beard_reference_path: str | None = None,
+        hair_color_name: str = "",
+        beard_color_name: str = "",
+        apply_beard_edit: bool = False,
+    ) -> PlaygroundImageResult:
+        _ = beard_reference_path, hair_color_name, beard_color_name, apply_beard_edit
         _ = reference_path
         with open(selfie_path, "rb") as file_obj:
             image_bytes = file_obj.read()
@@ -179,9 +355,20 @@ class NanobananaProvider:
     def __init__(self):
         self.api_key = str(getattr(settings, "AI_PLAYGROUND_NANOBANANA_API_KEY", "")).strip()
         self.model = str(
-            getattr(settings, "AI_PLAYGROUND_NANOBANANA_MODEL", "gemini-2.5-flash-image-preview")
+            getattr(settings, "AI_PLAYGROUND_NANOBANANA_MODEL", "gemini-2.5-flash-image")
         ).strip()
         self.timeout_seconds = int(getattr(settings, "AI_PLAYGROUND_PROVIDER_TIMEOUT_SECONDS", 120))
+        model_pricing = _nanobanana_model_pricing(self.model)
+        if model_pricing:
+            self.input_cost_per_1m_tokens = model_pricing.input_cost_per_1m_tokens
+            self.output_cost_per_1m_tokens = model_pricing.output_cost_per_1m_tokens
+        else:
+            self.input_cost_per_1m_tokens = _safe_float(
+                getattr(settings, "AI_PLAYGROUND_NANOBANANA_INPUT_COST_PER_1M_TOKENS", 0)
+            )
+            self.output_cost_per_1m_tokens = _safe_float(
+                getattr(settings, "AI_PLAYGROUND_NANOBANANA_OUTPUT_COST_PER_1M_TOKENS", 0)
+            )
         endpoint_override = str(getattr(settings, "AI_PLAYGROUND_NANOBANANA_ENDPOINT", "")).strip()
         if endpoint_override:
             self.endpoint = endpoint_override
@@ -191,27 +378,55 @@ class NanobananaProvider:
                 f"{quote(self.model, safe='')}:generateContent"
             )
 
-    def generate(self, *, selfie_path: str, reference_path: str) -> PlaygroundImageResult:
+    def generate(
+        self,
+        *,
+        selfie_path: str,
+        reference_path: str,
+        beard_reference_path: str | None = None,
+        hair_color_name: str = "",
+        beard_color_name: str = "",
+        apply_beard_edit: bool = False,
+    ) -> PlaygroundImageResult:
         if not self.api_key:
             raise PlaygroundProviderError("Nanobanana API key is missing.")
 
         selfie_mime, selfie_b64 = _image_file_as_base64(selfie_path)
         reference_mime, reference_b64 = _image_file_as_base64(reference_path)
+        beard_mime = ""
+        beard_b64 = ""
+        if beard_reference_path:
+            beard_mime, beard_b64 = _image_file_as_base64(beard_reference_path)
+
+        content_parts = [
+            {"text": "Image 1 (identity anchor selfie):"},
+            {"inlineData": {"mimeType": selfie_mime, "data": selfie_b64}},
+            {"text": "Image 2 (target hairstyle reference):"},
+            {"inlineData": {"mimeType": reference_mime, "data": reference_b64}},
+        ]
+        if beard_reference_path:
+            content_parts.extend(
+                [
+                    {"text": "Image 3 (target beard reference):"},
+                    {"inlineData": {"mimeType": beard_mime, "data": beard_b64}},
+                ]
+            )
+        content_parts.append(
+            {
+                "text": build_hair_transformation_prompt(
+                    use_composite_input=False,
+                    include_beard_reference=bool(beard_reference_path),
+                    hair_color_name=hair_color_name,
+                    beard_color_name=beard_color_name,
+                    apply_beard_edit=apply_beard_edit,
+                )
+            }
+        )
 
         payload = {
             "contents": [
                 {
-                    "parts": [
-                        {"text": "Image 1 (identity anchor selfie):"},
-                        {"inlineData": {"mimeType": selfie_mime, "data": selfie_b64}},
-                        {"text": "Image 2 (target haircut reference):"},
-                        {"inlineData": {"mimeType": reference_mime, "data": reference_b64}},
-                        {
-                            "text": build_hair_transformation_prompt(
-                                use_composite_input=False,
-                            )
-                        },
-                    ]
+                    "parts": content_parts,
                 }
             ],
             "generationConfig": {"responseModalities": ["IMAGE"]},
@@ -222,6 +437,17 @@ class NanobananaProvider:
             payload,
             headers={"x-goog-api-key": self.api_key},
             timeout_seconds=self.timeout_seconds,
+        )
+        usage_metrics = _extract_gemini_usage_metrics(response_payload)
+        estimated_cost_usd = _estimate_nanobanana_cost_usd(
+            usage=usage_metrics,
+            input_cost_per_1m_tokens=self.input_cost_per_1m_tokens,
+            output_cost_per_1m_tokens=self.output_cost_per_1m_tokens,
+        )
+        _log_nanobanana_usage(
+            model=self.model,
+            usage=usage_metrics,
+            estimated_cost_usd=estimated_cost_usd,
         )
         image_bytes, mime_type = _extract_gemini_image(response_payload)
         return PlaygroundImageResult(image_bytes=image_bytes, mime_type=mime_type, provider=self.provider)
@@ -239,17 +465,35 @@ class GrokImagesProvider:
         self.timeout_seconds = int(getattr(settings, "AI_PLAYGROUND_PROVIDER_TIMEOUT_SECONDS", 120))
         self.output_format = str(getattr(settings, "AI_PLAYGROUND_GROK_IMAGE_FORMAT", "base64")).strip()
 
-    def generate(self, *, selfie_path: str, reference_path: str) -> PlaygroundImageResult:
+    def generate(
+        self,
+        *,
+        selfie_path: str,
+        reference_path: str,
+        beard_reference_path: str | None = None,
+        hair_color_name: str = "",
+        beard_color_name: str = "",
+        apply_beard_edit: bool = False,
+    ) -> PlaygroundImageResult:
         if not self.api_key:
             raise PlaygroundProviderError("Grok API key is missing.")
 
-        composite_bytes = _build_composite_reference(selfie_path, reference_path)
+        reference_paths = [reference_path]
+        if beard_reference_path:
+            reference_paths.append(beard_reference_path)
+        composite_bytes = _build_composite_reference(selfie_path, reference_paths)
         composite_b64 = base64.b64encode(composite_bytes).decode("utf-8")
         data_url = f"data:image/jpeg;base64,{composite_b64}"
 
         payload = {
             "model": self.model,
-            "prompt": build_hair_transformation_prompt(use_composite_input=True),
+            "prompt": build_hair_transformation_prompt(
+                use_composite_input=True,
+                include_beard_reference=bool(beard_reference_path),
+                hair_color_name=hair_color_name,
+                beard_color_name=beard_color_name,
+                apply_beard_edit=apply_beard_edit,
+            ),
             "image_url": data_url,
             "image_format": self.output_format,
         }

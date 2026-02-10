@@ -12,7 +12,7 @@
 - Custom user model with roles: owner/admin, receptionist, barber
 - Permission toggle model for owner-controlled access changes
 - Core domain models: clients, services, appointments, and audit logs
-- Arabic/English multilingual setup with Arabic default and RTL support
+- Arabic/English multilingual setup with English default and RTL support
 - Server-rendered base UI with custom CSS and brand logo integration
 - Working M2 screens: clients, service catalog, appointments, and walk-ins
 - Audit logging signals for create/update/delete on core business models
@@ -33,8 +33,12 @@ Set these environment variables before running the server to enable real AI imag
 
 Nanobanana (Gemini image API):
 - `AI_PLAYGROUND_NANOBANANA_API_KEY`
-- `AI_PLAYGROUND_NANOBANANA_MODEL` (default: `gemini-2.5-flash-image-preview`)
+- `AI_PLAYGROUND_NANOBANANA_MODEL` (default: `gemini-2.5-flash-image`)
 - `AI_PLAYGROUND_NANOBANANA_ENDPOINT` (optional override)
+- Cost estimates are auto-detected by model for:
+  - `gemini-2.5-flash-image` (input `$0.30` / output `$30.00` per 1M tokens)
+  - `gemini-3-pro-image-preview` (input `$2.00` / output `$120.00` per 1M tokens)
+- `AI_PLAYGROUND_NANOBANANA_INPUT_COST_PER_1M_TOKENS` and `AI_PLAYGROUND_NANOBANANA_OUTPUT_COST_PER_1M_TOKENS` are only used as fallback for unknown/custom model IDs.
 
 Grok images:
 - `AI_PLAYGROUND_GROK_API_KEY`

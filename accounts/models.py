@@ -20,8 +20,8 @@ class User(AbstractUser):
     display_name = models.CharField(max_length=150, blank=True)
     preferred_language = models.CharField(
         max_length=8,
-        choices=[("ar", _("Arabic")), ("en", _("English"))],
-        default="ar",
+        choices=[("en", _("English")), ("ar", _("Arabic"))],
+        default="en",
     )
     role = models.CharField(
         max_length=32,

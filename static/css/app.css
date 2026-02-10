@@ -284,6 +284,12 @@ html[dir="rtl"] .app-main {
     color: var(--primary);
 }
 
+.btn.btn-outline:hover {
+    background: rgba(31, 94, 255, 0.1);
+    border-color: var(--primary);
+    color: var(--primary-dark);
+}
+
 .auth-card {
     max-width: 420px;
     margin: 2rem auto;

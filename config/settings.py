@@ -97,10 +97,10 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-LANGUAGE_CODE = "ar"
+LANGUAGE_CODE = "en"
 LANGUAGES = [
-    ("ar", _("Arabic")),
     ("en", _("English")),
+    ("ar", _("Arabic")),
 ]
 LOCALE_PATHS = [BASE_DIR / "locale"]
 
@@ -164,9 +164,17 @@ else:
 AI_PLAYGROUND_NANOBANANA_API_KEY = os.getenv("AI_PLAYGROUND_NANOBANANA_API_KEY", "")
 AI_PLAYGROUND_NANOBANANA_MODEL = os.getenv(
     "AI_PLAYGROUND_NANOBANANA_MODEL",
-    "gemini-2.5-flash-image-preview",
+    "gemini-2.5-flash-image",
 )
 AI_PLAYGROUND_NANOBANANA_ENDPOINT = os.getenv("AI_PLAYGROUND_NANOBANANA_ENDPOINT", "")
+AI_PLAYGROUND_NANOBANANA_INPUT_COST_PER_1M_TOKENS = os.getenv(
+    "AI_PLAYGROUND_NANOBANANA_INPUT_COST_PER_1M_TOKENS",
+    "0",
+)
+AI_PLAYGROUND_NANOBANANA_OUTPUT_COST_PER_1M_TOKENS = os.getenv(
+    "AI_PLAYGROUND_NANOBANANA_OUTPUT_COST_PER_1M_TOKENS",
+    "0",
+)
 
 AI_PLAYGROUND_GROK_API_KEY = os.getenv("AI_PLAYGROUND_GROK_API_KEY", "")
 AI_PLAYGROUND_GROK_MODEL = os.getenv("AI_PLAYGROUND_GROK_MODEL", "grok-2-image")
@@ -175,5 +183,22 @@ AI_PLAYGROUND_GROK_IMAGES_ENDPOINT = os.getenv(
     "https://api.x.ai/v1/images/edits",
 )
 AI_PLAYGROUND_GROK_IMAGE_FORMAT = os.getenv("AI_PLAYGROUND_GROK_IMAGE_FORMAT", "base64")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "loggers": {
+        "ai_playground.nanobanana.usage": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

@@ -17,8 +17,49 @@ def _default_session_expiry():
 
 
 class PlaygroundStyle(models.Model):
-    name = models.CharField(max_length=120)
+    name = models.CharField(max_length=120, blank=True, null=True)
     image = models.ImageField(upload_to="ai-playground/styles/%Y/%m/%d")
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sort_order", "id"]
+
+    def __str__(self):
+        return self.name or "Untitled style"
+
+
+class PlaygroundBeardStyle(models.Model):
+    name = models.CharField(max_length=120, blank=True, null=True)
+    image = models.ImageField(upload_to="ai-playground/beard-styles/%Y/%m/%d")
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sort_order", "id"]
+
+    def __str__(self):
+        return self.name or "Untitled beard style"
+
+
+class PlaygroundColorScopeChoices(models.TextChoices):
+    HAIR = "hair", _("Hair")
+    BEARD = "beard", _("Beard")
+    BOTH = "both", _("Hair + Beard")
+
+
+class PlaygroundColorOption(models.Model):
+    name = models.CharField(max_length=64)
+    hex_code = models.CharField(max_length=7, default="#111111")
+    scope = models.CharField(
+        max_length=12,
+        choices=PlaygroundColorScopeChoices.choices,
+        default=PlaygroundColorScopeChoices.BOTH,
+    )
     is_active = models.BooleanField(default=True)
     sort_order = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -89,12 +130,34 @@ class PlaygroundGeneration(models.Model):
         null=True,
         blank=True,
     )
+    beard_style = models.ForeignKey(
+        PlaygroundBeardStyle,
+        on_delete=models.SET_NULL,
+        related_name="generations",
+        null=True,
+        blank=True,
+    )
+    hair_color_option = models.ForeignKey(
+        PlaygroundColorOption,
+        on_delete=models.SET_NULL,
+        related_name="hair_generations",
+        null=True,
+        blank=True,
+    )
+    beard_color_option = models.ForeignKey(
+        PlaygroundColorOption,
+        on_delete=models.SET_NULL,
+        related_name="beard_generations",
+        null=True,
+        blank=True,
+    )
     selfie_image = models.ImageField(upload_to="ai-playground/selfies/%Y/%m/%d")
     custom_style_image = models.ImageField(
         upload_to="ai-playground/custom-styles/%Y/%m/%d",
         null=True,
         blank=True,
     )
+    custom_style_fingerprint = models.CharField(max_length=64, blank=True, db_index=True)
     result_image = models.ImageField(
         upload_to="ai-playground/results/%Y/%m/%d",
         null=True,
