@@ -35,6 +35,18 @@ Nanobanana (Gemini image API):
 - `AI_PLAYGROUND_NANOBANANA_API_KEY`
 - `AI_PLAYGROUND_NANOBANANA_MODEL` (default: `gemini-2.5-flash-image`)
 - `AI_PLAYGROUND_NANOBANANA_ENDPOINT` (optional override)
+- `AI_PLAYGROUND_NANOBANANA_IMAGE_SIZE` (optional: `1K`, `2K`, `4K`)
+  - If unset, `gemini-3-pro-image-preview` is forced to `1K` output to minimize output-token cost.
+- Prompt set toggles for fast A/B testing:
+  - `AI_PLAYGROUND_NANOBANANA_PROMPT_SET` (global default; valid values: `1`, `2`, `3`, `4`, `5`; default: `1`)
+  - `AI_PLAYGROUND_NANOBANANA_FLASH_PROMPT_SET` (optional flash-only override)
+  - `AI_PLAYGROUND_NANOBANANA_PRO_PROMPT_SET` (optional pro-only override)
+  - Set meaning:
+    - `1`: balanced replacement (default)
+    - `2`: aggressive visible-change enforcement
+    - `3`: shorter direct prompt
+    - `4`: staged replacement prompt
+    - `5`: concise flash-first haircut replacement prompt
 - Cost estimates are auto-detected by model for:
   - `gemini-2.5-flash-image` (input `$0.30` / output `$30.00` per 1M tokens)
   - `gemini-3-pro-image-preview` (input `$2.00` / output `$120.00` per 1M tokens)

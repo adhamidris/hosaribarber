@@ -13,7 +13,11 @@ from urllib.request import Request, urlopen
 from django.conf import settings
 from PIL import Image
 
-from .prompts import build_hair_transformation_prompt
+from .prompts import (
+    PROMPT_STYLE_FLASH,
+    PROMPT_STYLE_PRO,
+    build_hair_transformation_prompt,
+)
 
 
 class PlaygroundProviderError(RuntimeError):
@@ -51,6 +55,10 @@ NANOBANANA_MODEL_PRICING: dict[str, GeminiTokenPricing] = {
         output_cost_per_1m_tokens=120.00,
     ),
 }
+NANOBANANA_IMAGE_SIZE_OPTIONS = {"1K", "2K", "4K"}
+NANOBANANA_PRO_IMAGE_MODEL_PREFIX = "gemini-3-pro-image-preview"
+NANOBANANA_PROMPT_SET_OPTIONS = {1, 2, 3, 4, 5}
+NANOBANANA_DEFAULT_PROMPT_SET = 1
 
 
 def configured_provider_name() -> str:
@@ -187,6 +195,13 @@ def _nanobanana_model_pricing(model_name: str) -> GeminiTokenPricing | None:
     return None
 
 
+def _is_nanobanana_pro_image_model(model_name: str) -> bool:
+    normalized_model = _normalize_model_id(model_name)
+    return normalized_model == NANOBANANA_PRO_IMAGE_MODEL_PREFIX or normalized_model.startswith(
+        f"{NANOBANANA_PRO_IMAGE_MODEL_PREFIX}-"
+    )
+
+
 def _extract_gemini_usage_metrics(payload: dict[str, Any]) -> GeminiUsageMetrics:
     usage = payload.get("usageMetadata")
     if usage is None:
@@ -252,6 +267,8 @@ def _estimate_nanobanana_cost_usd(
 def _log_nanobanana_usage(
     *,
     model: str,
+    prompt_style: str,
+    prompt_set: int,
     usage: GeminiUsageMetrics,
     estimated_cost_usd: float | None,
 ) -> None:
@@ -260,8 +277,13 @@ def _log_nanobanana_usage(
     total_value = "unknown" if usage.total_tokens is None else str(usage.total_tokens)
     cost_value = "unknown" if estimated_cost_usd is None else f"{estimated_cost_usd:.8f}"
     NANOBANANA_USAGE_LOGGER.info(
-        "nanobanana_usage model=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s estimated_cost_usd=%s",
+        (
+            "nanobanana_usage model=%s prompt_style=%s prompt_set=%s "
+            "prompt_tokens=%s completion_tokens=%s total_tokens=%s estimated_cost_usd=%s"
+        ),
         model,
+        prompt_style,
+        str(prompt_set),
         prompt_value,
         completion_value,
         total_value,
@@ -358,6 +380,12 @@ class NanobananaProvider:
             getattr(settings, "AI_PLAYGROUND_NANOBANANA_MODEL", "gemini-2.5-flash-image")
         ).strip()
         self.timeout_seconds = int(getattr(settings, "AI_PLAYGROUND_PROVIDER_TIMEOUT_SECONDS", 120))
+        self.image_size_override = str(
+            getattr(settings, "AI_PLAYGROUND_NANOBANANA_IMAGE_SIZE", "")
+        ).strip().upper()
+        self.default_prompt_set = str(getattr(settings, "AI_PLAYGROUND_NANOBANANA_PROMPT_SET", "1")).strip()
+        self.flash_prompt_set = str(getattr(settings, "AI_PLAYGROUND_NANOBANANA_FLASH_PROMPT_SET", "")).strip()
+        self.pro_prompt_set = str(getattr(settings, "AI_PLAYGROUND_NANOBANANA_PRO_PROMPT_SET", "")).strip()
         model_pricing = _nanobanana_model_pricing(self.model)
         if model_pricing:
             self.input_cost_per_1m_tokens = model_pricing.input_cost_per_1m_tokens
@@ -378,6 +406,28 @@ class NanobananaProvider:
                 f"{quote(self.model, safe='')}:generateContent"
             )
 
+    def _resolved_image_size(self) -> str | None:
+        if not _is_nanobanana_pro_image_model(self.model):
+            return None
+        if self.image_size_override in NANOBANANA_IMAGE_SIZE_OPTIONS:
+            return self.image_size_override
+        return "1K"
+
+    def _resolved_prompt_style(self) -> str:
+        if _is_nanobanana_pro_image_model(self.model):
+            return PROMPT_STYLE_PRO
+        return PROMPT_STYLE_FLASH
+
+    def _resolved_prompt_set(self) -> int:
+        if _is_nanobanana_pro_image_model(self.model):
+            raw_prompt_set = self.pro_prompt_set or self.default_prompt_set
+        else:
+            raw_prompt_set = self.flash_prompt_set or self.default_prompt_set
+        parsed_prompt_set = _safe_int(raw_prompt_set)
+        if parsed_prompt_set in NANOBANANA_PROMPT_SET_OPTIONS:
+            return int(parsed_prompt_set)
+        return NANOBANANA_DEFAULT_PROMPT_SET
+
     def generate(
         self,
         *,
@@ -390,6 +440,9 @@ class NanobananaProvider:
     ) -> PlaygroundImageResult:
         if not self.api_key:
             raise PlaygroundProviderError("Nanobanana API key is missing.")
+
+        resolved_prompt_style = self._resolved_prompt_style()
+        resolved_prompt_set = self._resolved_prompt_set()
 
         selfie_mime, selfie_b64 = _image_file_as_base64(selfie_path)
         reference_mime, reference_b64 = _image_file_as_base64(reference_path)
@@ -419,9 +472,16 @@ class NanobananaProvider:
                     hair_color_name=hair_color_name,
                     beard_color_name=beard_color_name,
                     apply_beard_edit=apply_beard_edit,
+                    prompt_style=resolved_prompt_style,
+                    prompt_set=resolved_prompt_set,
                 )
             }
         )
+
+        generation_config: dict[str, Any] = {"responseModalities": ["IMAGE"]}
+        image_size = self._resolved_image_size()
+        if image_size:
+            generation_config["imageConfig"] = {"imageSize": image_size}
 
         payload = {
             "contents": [
@@ -429,7 +489,7 @@ class NanobananaProvider:
                     "parts": content_parts,
                 }
             ],
-            "generationConfig": {"responseModalities": ["IMAGE"]},
+            "generationConfig": generation_config,
         }
 
         response_payload = _post_json(
@@ -446,6 +506,8 @@ class NanobananaProvider:
         )
         _log_nanobanana_usage(
             model=self.model,
+            prompt_style=resolved_prompt_style,
+            prompt_set=resolved_prompt_set,
             usage=usage_metrics,
             estimated_cost_usd=estimated_cost_usd,
         )
@@ -493,6 +555,7 @@ class GrokImagesProvider:
                 hair_color_name=hair_color_name,
                 beard_color_name=beard_color_name,
                 apply_beard_edit=apply_beard_edit,
+                prompt_style=PROMPT_STYLE_PRO,
             ),
             "image_url": data_url,
             "image_format": self.output_format,

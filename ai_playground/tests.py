@@ -540,6 +540,30 @@ class PlaygroundApiTests(TestCase):
 
 
 class PlaygroundNanobananaUsageTests(TestCase):
+    @staticmethod
+    def _nanobanana_image_response_payload():
+        return {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/png",
+                                    "data": base64.b64encode(b"fake-image").decode("utf-8"),
+                                }
+                            }
+                        ]
+                    }
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 1200,
+                "candidatesTokenCount": 300,
+                "totalTokenCount": 1500,
+            },
+        }
+
     def test_extract_gemini_usage_metrics_from_usage_metadata(self):
         payload = {
             "usageMetadata": {
@@ -580,31 +604,13 @@ class PlaygroundNanobananaUsageTests(TestCase):
     @override_settings(
         AI_PLAYGROUND_NANOBANANA_API_KEY="test-api-key",
         AI_PLAYGROUND_NANOBANANA_MODEL="gemini-2.5-flash-image",
+        AI_PLAYGROUND_NANOBANANA_PROMPT_SET="1",
+        AI_PLAYGROUND_NANOBANANA_FLASH_PROMPT_SET="",
         AI_PLAYGROUND_NANOBANANA_INPUT_COST_PER_1M_TOKENS="0.10",
         AI_PLAYGROUND_NANOBANANA_OUTPUT_COST_PER_1M_TOKENS="0.40",
     )
     def test_nanobanana_provider_logs_usage_and_estimated_cost(self):
-        response_payload = {
-            "candidates": [
-                {
-                    "content": {
-                        "parts": [
-                            {
-                                "inlineData": {
-                                    "mimeType": "image/png",
-                                    "data": base64.b64encode(b"fake-image").decode("utf-8"),
-                                }
-                            }
-                        ]
-                    }
-                }
-            ],
-            "usageMetadata": {
-                "promptTokenCount": 1200,
-                "candidatesTokenCount": 300,
-                "totalTokenCount": 1500,
-            },
-        }
+        response_payload = self._nanobanana_image_response_payload()
 
         with (
             patch(
@@ -624,14 +630,264 @@ class PlaygroundNanobananaUsageTests(TestCase):
         self.assertEqual(
             usage_log_info.call_args[0],
             (
-                "nanobanana_usage model=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s estimated_cost_usd=%s",
+                (
+                    "nanobanana_usage model=%s prompt_style=%s prompt_set=%s "
+                    "prompt_tokens=%s completion_tokens=%s total_tokens=%s estimated_cost_usd=%s"
+                ),
                 "gemini-2.5-flash-image",
+                "flash",
+                "1",
                 "1200",
                 "300",
                 "1500",
                 "0.00936000",
             ),
         )
+
+    @override_settings(
+        AI_PLAYGROUND_NANOBANANA_API_KEY="test-api-key",
+        AI_PLAYGROUND_NANOBANANA_MODEL="gemini-3-pro-image-preview",
+    )
+    def test_nanobanana_pro_model_forces_1k_image_size(self):
+        response_payload = self._nanobanana_image_response_payload()
+        with (
+            patch(
+                "ai_playground.services._image_file_as_base64",
+                side_effect=[("image/jpeg", "selfie-data"), ("image/jpeg", "style-data")],
+            ),
+            patch("ai_playground.services._post_json", return_value=response_payload) as post_json,
+        ):
+            NanobananaProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/reference.jpg",
+            )
+
+        sent_payload = post_json.call_args.args[1]
+        self.assertEqual(
+            sent_payload["generationConfig"],
+            {
+                "responseModalities": ["IMAGE"],
+                "imageConfig": {"imageSize": "1K"},
+            },
+        )
+
+    @override_settings(
+        AI_PLAYGROUND_NANOBANANA_API_KEY="test-api-key",
+        AI_PLAYGROUND_NANOBANANA_MODEL="gemini-3-pro-image-preview",
+        AI_PLAYGROUND_NANOBANANA_IMAGE_SIZE="2K",
+    )
+    def test_nanobanana_pro_model_uses_configured_image_size_override(self):
+        response_payload = self._nanobanana_image_response_payload()
+        with (
+            patch(
+                "ai_playground.services._image_file_as_base64",
+                side_effect=[("image/jpeg", "selfie-data"), ("image/jpeg", "style-data")],
+            ),
+            patch("ai_playground.services._post_json", return_value=response_payload) as post_json,
+        ):
+            NanobananaProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/reference.jpg",
+            )
+
+        sent_payload = post_json.call_args.args[1]
+        self.assertEqual(
+            sent_payload["generationConfig"],
+            {
+                "responseModalities": ["IMAGE"],
+                "imageConfig": {"imageSize": "2K"},
+            },
+        )
+
+    @override_settings(
+        AI_PLAYGROUND_NANOBANANA_API_KEY="test-api-key",
+        AI_PLAYGROUND_NANOBANANA_MODEL="gemini-2.5-flash-image",
+        AI_PLAYGROUND_NANOBANANA_IMAGE_SIZE="4K",
+    )
+    def test_nanobanana_flash_model_ignores_image_size_override(self):
+        response_payload = self._nanobanana_image_response_payload()
+        with (
+            patch(
+                "ai_playground.services._image_file_as_base64",
+                side_effect=[("image/jpeg", "selfie-data"), ("image/jpeg", "style-data")],
+            ),
+            patch("ai_playground.services._post_json", return_value=response_payload) as post_json,
+        ):
+            NanobananaProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/reference.jpg",
+            )
+
+        sent_payload = post_json.call_args.args[1]
+        self.assertEqual(sent_payload["generationConfig"], {"responseModalities": ["IMAGE"]})
+
+    @override_settings(
+        AI_PLAYGROUND_NANOBANANA_API_KEY="test-api-key",
+        AI_PLAYGROUND_NANOBANANA_MODEL="gemini-2.5-flash-image",
+        AI_PLAYGROUND_NANOBANANA_PROMPT_SET="1",
+        AI_PLAYGROUND_NANOBANANA_FLASH_PROMPT_SET="",
+    )
+    def test_nanobanana_flash_model_uses_flash_prompt_style(self):
+        response_payload = self._nanobanana_image_response_payload()
+        with (
+            patch(
+                "ai_playground.services._image_file_as_base64",
+                side_effect=[("image/jpeg", "selfie-data"), ("image/jpeg", "style-data")],
+            ),
+            patch("ai_playground.services._post_json", return_value=response_payload) as post_json,
+        ):
+            NanobananaProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/reference.jpg",
+            )
+
+        sent_payload = post_json.call_args.args[1]
+        prompt_text = sent_payload["contents"][0]["parts"][-1]["text"].lower()
+        self.assertIn("use image 2 as the haircut target for image 1", prompt_text)
+        self.assertNotIn("execution guidelines", prompt_text)
+
+    @override_settings(
+        AI_PLAYGROUND_NANOBANANA_API_KEY="test-api-key",
+        AI_PLAYGROUND_NANOBANANA_MODEL="gemini-3-pro-image-preview",
+    )
+    def test_nanobanana_pro_model_uses_pro_prompt_style(self):
+        response_payload = self._nanobanana_image_response_payload()
+        with (
+            patch(
+                "ai_playground.services._image_file_as_base64",
+                side_effect=[("image/jpeg", "selfie-data"), ("image/jpeg", "style-data")],
+            ),
+            patch("ai_playground.services._post_json", return_value=response_payload) as post_json,
+        ):
+            NanobananaProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/reference.jpg",
+            )
+
+        sent_payload = post_json.call_args.args[1]
+        prompt_text = sent_payload["contents"][0]["parts"][-1]["text"].lower()
+        self.assertIn("operation: hair replacement", prompt_text)
+        self.assertIn("execution guidelines", prompt_text)
+
+    @override_settings(
+        AI_PLAYGROUND_NANOBANANA_API_KEY="test-api-key",
+        AI_PLAYGROUND_NANOBANANA_MODEL="gemini-2.5-flash-image",
+        AI_PLAYGROUND_NANOBANANA_PROMPT_SET="2",
+        AI_PLAYGROUND_NANOBANANA_FLASH_PROMPT_SET="",
+    )
+    def test_nanobanana_uses_global_prompt_set_when_model_override_missing(self):
+        response_payload = self._nanobanana_image_response_payload()
+        with (
+            patch(
+                "ai_playground.services._image_file_as_base64",
+                side_effect=[("image/jpeg", "selfie-data"), ("image/jpeg", "style-data")],
+            ),
+            patch("ai_playground.services._post_json", return_value=response_payload) as post_json,
+        ):
+            NanobananaProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/reference.jpg",
+            )
+
+        sent_payload = post_json.call_args.args[1]
+        prompt_text = sent_payload["contents"][0]["parts"][-1]["text"].lower()
+        self.assertIn("if the result looks unchanged, regenerate with stronger replacement", prompt_text)
+
+    @override_settings(
+        AI_PLAYGROUND_NANOBANANA_API_KEY="test-api-key",
+        AI_PLAYGROUND_NANOBANANA_MODEL="gemini-2.5-flash-image",
+        AI_PLAYGROUND_NANOBANANA_PROMPT_SET="1",
+        AI_PLAYGROUND_NANOBANANA_FLASH_PROMPT_SET="4",
+    )
+    def test_nanobanana_flash_prompt_set_override_wins_over_global(self):
+        response_payload = self._nanobanana_image_response_payload()
+        with (
+            patch(
+                "ai_playground.services._image_file_as_base64",
+                side_effect=[("image/jpeg", "selfie-data"), ("image/jpeg", "style-data")],
+            ),
+            patch("ai_playground.services._post_json", return_value=response_payload) as post_json,
+        ):
+            NanobananaProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/reference.jpg",
+            )
+
+        sent_payload = post_json.call_args.args[1]
+        prompt_text = sent_payload["contents"][0]["parts"][-1]["text"].lower()
+        self.assertIn("two-step edit: first remove existing scalp hair", prompt_text)
+
+    @override_settings(
+        AI_PLAYGROUND_NANOBANANA_API_KEY="test-api-key",
+        AI_PLAYGROUND_NANOBANANA_MODEL="gemini-3-pro-image-preview",
+        AI_PLAYGROUND_NANOBANANA_PROMPT_SET="1",
+        AI_PLAYGROUND_NANOBANANA_PRO_PROMPT_SET="3",
+    )
+    def test_nanobanana_pro_prompt_set_override_wins_over_global(self):
+        response_payload = self._nanobanana_image_response_payload()
+        with (
+            patch(
+                "ai_playground.services._image_file_as_base64",
+                side_effect=[("image/jpeg", "selfie-data"), ("image/jpeg", "style-data")],
+            ),
+            patch("ai_playground.services._post_json", return_value=response_payload) as post_json,
+        ):
+            NanobananaProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/reference.jpg",
+            )
+
+        sent_payload = post_json.call_args.args[1]
+        prompt_text = sent_payload["contents"][0]["parts"][-1]["text"].lower()
+        self.assertIn("output must show a visible haircut change", prompt_text)
+
+    @override_settings(
+        AI_PLAYGROUND_NANOBANANA_API_KEY="test-api-key",
+        AI_PLAYGROUND_NANOBANANA_MODEL="gemini-2.5-flash-image",
+        AI_PLAYGROUND_NANOBANANA_PROMPT_SET="99",
+        AI_PLAYGROUND_NANOBANANA_FLASH_PROMPT_SET="",
+    )
+    def test_nanobanana_invalid_prompt_set_falls_back_to_default(self):
+        response_payload = self._nanobanana_image_response_payload()
+        with (
+            patch(
+                "ai_playground.services._image_file_as_base64",
+                side_effect=[("image/jpeg", "selfie-data"), ("image/jpeg", "style-data")],
+            ),
+            patch("ai_playground.services._post_json", return_value=response_payload) as post_json,
+        ):
+            NanobananaProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/reference.jpg",
+            )
+
+        sent_payload = post_json.call_args.args[1]
+        prompt_text = sent_payload["contents"][0]["parts"][-1]["text"].lower()
+        self.assertIn("use image 2 as the haircut target for image 1", prompt_text)
+
+    @override_settings(
+        AI_PLAYGROUND_NANOBANANA_API_KEY="test-api-key",
+        AI_PLAYGROUND_NANOBANANA_MODEL="gemini-2.5-flash-image",
+        AI_PLAYGROUND_NANOBANANA_PROMPT_SET="5",
+        AI_PLAYGROUND_NANOBANANA_FLASH_PROMPT_SET="",
+    )
+    def test_nanobanana_flash_prompt_set_5_is_applied(self):
+        response_payload = self._nanobanana_image_response_payload()
+        with (
+            patch(
+                "ai_playground.services._image_file_as_base64",
+                side_effect=[("image/jpeg", "selfie-data"), ("image/jpeg", "style-data")],
+            ),
+            patch("ai_playground.services._post_json", return_value=response_payload) as post_json,
+        ):
+            NanobananaProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/reference.jpg",
+            )
+
+        sent_payload = post_json.call_args.args[1]
+        prompt_text = sent_payload["contents"][0]["parts"][-1]["text"].lower()
+        self.assertIn("change only the scalp hair in image 1", prompt_text)
 
 
 @override_settings(
