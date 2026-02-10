@@ -256,12 +256,31 @@
                     </div>
                 </div>
                 <div id="selfie-preview-block" class="ai-selfie-preview-block{% if not active_session.has_selfie %} hidden{% endif %}">
-                    <img
-                        id="selfie-preview"
-                        class="camera-preview{% if not active_session.selfie_image %} hidden{% endif %}"
-                        {% if active_session.selfie_image %}src="{{ active_session.selfie_image.url }}"{% endif %}
-                        alt="{% trans 'Saved selfie preview' %}"
-                    >
+                    <div id="selfie-compare-stage" class="ai-selfie-compare-stage{% if latest_generation %} is-split has-result{% endif %}">
+                        <div class="ai-compare-pane ai-compare-pane-before">
+                            <img
+                                id="selfie-preview"
+                                class="camera-preview{% if not active_session.selfie_image %} hidden{% endif %}"
+                                {% if active_session.selfie_image %}src="{{ active_session.selfie_image.url }}"{% endif %}
+                                alt="{% trans 'Saved selfie preview' %}"
+                            >
+                            <span class="ai-compare-tag">{% trans "Before" %}</span>
+                        </div>
+                        <div class="ai-compare-separator" aria-hidden="true"></div>
+                        <div class="ai-compare-pane ai-compare-pane-after">
+                            <img
+                                id="generated-result-image"
+                                class="camera-preview{% if not latest_generation %} hidden{% endif %}"
+                                {% if latest_generation %}src="{{ latest_generation.result_image.url }}"{% endif %}
+                                alt="{% trans 'Generated haircut preview' %}"
+                            >
+                            <div id="generate-loader" class="ai-generate-loader ai-compare-loader hidden">
+                                <span class="ai-spinner" aria-hidden="true"></span>
+                                <span>{% trans "Generating preview..." %}</span>
+                            </div>
+                            <span class="ai-compare-tag ai-compare-tag-after">{% trans "After" %}</span>
+                        </div>
+                    </div>
                     <div class="ai-selfie-preview-actions">
                         <button id="selfie-take-photo-btn" type="button" class="btn btn-sm">
                             {% trans "Take a photo" %}
@@ -276,48 +295,7 @@
                 </div>
                 <p id="selfie-status" class="muted hidden"></p>
                 <div id="selfie-generation-block" class="ai-selfie-generation-block{% if not active_session.has_selfie %} hidden{% endif %}">
-                    <div id="generate-loader" class="ai-generate-loader hidden">
-                        <span class="ai-spinner" aria-hidden="true"></span>
-                        <span>{% trans "Generating preview..." %}</span>
-                    </div>
-                    <p id="generate-status" class="muted">
-                        {% if latest_generation %}
-                            {% trans "Latest generated preview restored for this session." %}
-                        {% endif %}
-                    </p>
-                    <div id="generated-result-block" class="ai-selfie-preview-block{% if not latest_generation %} hidden{% endif %}">
-                        <img
-                            id="generated-result-image"
-                            class="camera-preview{% if not latest_generation %} hidden{% endif %}"
-                            {% if latest_generation %}src="{{ latest_generation.result_image.url }}"{% endif %}
-                            alt="{% trans 'Generated haircut preview' %}"
-                        >
-                    </div>
-                    <ul id="generation-log" class="ai-generation-log">
-                        {% for generation in recent_generations %}
-                            <li>
-                                {% if generation.style and generation.style.name %}
-                                    {{ generation.style.name }}
-                                {% elif generation.style %}
-                                    {% trans "Curated style" %}
-                                {% else %}
-                                    {% trans "Custom style" %}
-                                {% endif %}
-                                {% if generation.hair_color_option %}
-                                    · {{ generation.hair_color_option.name }}
-                                {% endif %}
-                                {% if generation.beard_style and generation.beard_style.name %}
-                                    · {{ generation.beard_style.name }}
-                                {% elif generation.beard_style %}
-                                    · {% trans "Beard style" %}
-                                {% endif %}
-                                {% if generation.beard_color_option %}
-                                    · {{ generation.beard_color_option.name }}
-                                {% endif %}
-                                · #{{ generation.id }} · {{ generation.status }} · {{ generation.provider|default:"unknown" }}{% if generation.processing_ms %} · {{ generation.processing_ms }}ms{% endif %}
-                            </li>
-                        {% endfor %}
-                    </ul>
+                    <p id="generate-status" class="muted"></p>
                 </div>
             </section>
         </div>

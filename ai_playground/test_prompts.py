@@ -7,14 +7,13 @@ class HairTransformationPromptTests(SimpleTestCase):
     def test_prompt_enforces_identity_and_hairline_constraints(self):
         prompt = build_hair_transformation_prompt()
         self.assertIn("keep identity and scene unchanged", prompt.lower())
-        self.assertIn("natural hairline geometry unchanged", prompt.lower())
+        self.assertIn("natural hairline unchanged", prompt.lower())
         self.assertIn("never invent a new hairline", prompt.lower())
-        self.assertIn("do not leave the original hairstyle unchanged", prompt.lower())
-        self.assertIn("style lock (highest priority)", prompt.lower())
-        self.assertIn("99.99% hairstyle fidelity", prompt.lower())
-        self.assertIn("exact specification, not inspiration", prompt.lower())
-        self.assertIn("do not output an alternate haircut", prompt.lower())
-        self.assertIn("strict reference-check", prompt.lower())
+        self.assertIn("haircut must visibly match the reference", prompt.lower())
+        self.assertIn("do not keep the original hairstyle", prompt.lower())
+        self.assertIn("no extra edits or beauty filters", prompt.lower())
+        self.assertIn("prioritize changing the hairstyle toward the reference", prompt.lower())
+        self.assertNotIn("99.99% hairstyle fidelity", prompt.lower())
 
     def test_composite_prompt_mentions_left_right_panels(self):
         prompt = build_hair_transformation_prompt(use_composite_input=True)

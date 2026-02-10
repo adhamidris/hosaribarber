@@ -42,6 +42,7 @@
   const selfieStep = document.getElementById("selfie-step");
   const selfieInputGrid = document.getElementById("selfie-input-grid");
   const selfiePreviewBlock = document.getElementById("selfie-preview-block");
+  const selfieCompareStage = document.getElementById("selfie-compare-stage");
   const styleStep = document.getElementById("style-step");
   const selfieVideo = document.getElementById("selfie-video");
   const selfiePreview = document.getElementById("selfie-preview");
@@ -66,9 +67,7 @@
   const defaultSelectionStatusText = (styleSelectionStatus?.textContent || "").trim();
   const generateLoader = document.getElementById("generate-loader");
   const generateStatus = document.getElementById("generate-status");
-  const generatedResultBlock = document.getElementById("generated-result-block");
   const generatedResultImage = document.getElementById("generated-result-image");
-  const generationLog = document.getElementById("generation-log");
   let hasSelfie = initialHasSelfie;
   let savedSelfieUrl = initialSelfieUrl;
   let pendingPreviewUrl = "";
@@ -115,9 +114,19 @@
     generateStatus.classList.toggle("warning-text", Boolean(isError));
   }
 
+  function updateCompareStageState() {
+    if (!selfieCompareStage) return;
+    const hasResult = Boolean(generatedResultImage && generatedResultImage.src && !generatedResultImage.classList.contains("hidden"));
+    const split = isGenerating || hasResult;
+    selfieCompareStage.classList.toggle("is-generating", Boolean(isGenerating));
+    selfieCompareStage.classList.toggle("has-result", hasResult);
+    selfieCompareStage.classList.toggle("is-split", split);
+  }
+
   function setGenerateLoading(isLoading) {
     if (!generateLoader) return;
     generateLoader.classList.toggle("hidden", !isLoading);
+    updateCompareStageState();
   }
 
   function setGeneratedImage(url) {
@@ -125,12 +134,12 @@
     if (!url) {
       generatedResultImage.src = "";
       generatedResultImage.classList.add("hidden");
-      if (generatedResultBlock) generatedResultBlock.classList.add("hidden");
+      updateCompareStageState();
       return;
     }
     generatedResultImage.src = url;
     generatedResultImage.classList.remove("hidden");
-    if (generatedResultBlock) generatedResultBlock.classList.remove("hidden");
+    updateCompareStageState();
   }
 
   function setUploadFilename(target, fileName) {
@@ -309,6 +318,7 @@
     if (selfieGenerationBlock) {
       selfieGenerationBlock.classList.toggle("hidden", !hasSavedPreview);
     }
+    updateCompareStageState();
     updateGenerateActionCta();
   }
 
@@ -335,10 +345,12 @@
     if (!src) {
       selfiePreview.src = "";
       selfiePreview.classList.add("hidden");
+      updateCompareStageState();
       return;
     }
     selfiePreview.src = src;
     selfiePreview.classList.remove("hidden");
+    updateCompareStageState();
   }
 
   function clearPendingPreview() {
@@ -496,6 +508,7 @@
 
   async function handleSelfieSelection(file, statusMessage) {
     if (!file) return;
+    setGeneratedImage("");
     clearPendingPreview();
     pendingPreviewUrl = URL.createObjectURL(file);
     setSelfiePreview(pendingPreviewUrl);
@@ -507,7 +520,7 @@
     await autoSaveSelfie(file);
   }
 
-  async function submitGeneration(formData, sourceLabel) {
+  async function submitGeneration(formData) {
     if (!hasSelfie) {
       setGenerateStatus(messages.selfieRequired, true);
       guideToSelfieStep();
@@ -549,17 +562,6 @@
         setGeneratedImage(resultUrl);
       }
       setGenerateStatus(payload.message || messages.generateComplete, false);
-      if (generationLog && payload.generation && !payload.reused) {
-        const item = document.createElement("li");
-        const provider = payload.generation.provider || "unknown";
-        const ms = Number.isFinite(payload.generation.processing_ms)
-          ? `${payload.generation.processing_ms}ms`
-          : "";
-        item.textContent = `${sourceLabel} · #${payload.generation.id} · ${payload.generation.status} · ${provider}${
-          ms ? ` · ${ms}` : ""
-        }`;
-        generationLog.prepend(item);
-      }
     } catch (error) {
       setGenerateStatus(error.message || messages.generateFailed, true);
     } finally {
@@ -622,6 +624,7 @@
     selfieReplaceBtn.addEventListener("click", () => {
       hasSelfie = false;
       savedSelfieUrl = "";
+      setGeneratedImage("");
       clearPendingSelfie();
       setSelfiePreview("");
       syncSelfieMode();
@@ -750,13 +753,7 @@
     formData.append("beard_style_id", selectedBeardStyleId);
     formData.append("beard_color_option_id", selectedBeardColorId);
 
-    const hairLabel =
-      selectedHairStyleId && selectedHairStyleId !== "none"
-        ? selectedHairStyleName || "Hairstyle"
-        : "No haircut change";
-    const beardLabel = selectedBeardStyleId === "none" ? "No beard change" : selectedBeardStyleName || "Beard style";
-    const sourceLabel = `${hairLabel} · ${selectedHairColorName || "Default"} · ${beardLabel} · ${selectedBeardColorName || "Default"}`;
-    await submitGeneration(formData, sourceLabel);
+    await submitGeneration(formData);
   }
 
   if (selfieGenerateBtn) {
@@ -779,6 +776,7 @@
   initializeDefaultSelections();
   applySelfieZoneState();
   syncSelfieMode();
+  updateCompareStageState();
   switchBuilderTab("hair");
   setStyleStepEnabled(true);
   updateSelfieControls();
