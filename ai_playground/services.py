@@ -70,6 +70,7 @@ def generate_hair_preview(
     selfie_path: str,
     reference_path: str,
     beard_reference_path: str | None = None,
+    style_description: str = "",
     hair_color_name: str = "",
     beard_color_name: str = "",
     apply_beard_edit: bool = False,
@@ -80,6 +81,7 @@ def generate_hair_preview(
         selfie_path=selfie_path,
         reference_path=reference_path,
         beard_reference_path=beard_reference_path,
+        style_description=style_description,
         hair_color_name=hair_color_name,
         beard_color_name=beard_color_name,
         apply_beard_edit=apply_beard_edit,
@@ -356,11 +358,12 @@ class StubProvider:
         selfie_path: str,
         reference_path: str,
         beard_reference_path: str | None = None,
+        style_description: str = "",
         hair_color_name: str = "",
         beard_color_name: str = "",
         apply_beard_edit: bool = False,
     ) -> PlaygroundImageResult:
-        _ = beard_reference_path, hair_color_name, beard_color_name, apply_beard_edit
+        _ = beard_reference_path, style_description, hair_color_name, beard_color_name, apply_beard_edit
         _ = reference_path
         with open(selfie_path, "rb") as file_obj:
             image_bytes = file_obj.read()
@@ -434,6 +437,7 @@ class NanobananaProvider:
         selfie_path: str,
         reference_path: str,
         beard_reference_path: str | None = None,
+        style_description: str = "",
         hair_color_name: str = "",
         beard_color_name: str = "",
         apply_beard_edit: bool = False,
@@ -469,6 +473,7 @@ class NanobananaProvider:
                 "text": build_hair_transformation_prompt(
                     use_composite_input=False,
                     include_beard_reference=bool(beard_reference_path),
+                    style_description=style_description,
                     hair_color_name=hair_color_name,
                     beard_color_name=beard_color_name,
                     apply_beard_edit=apply_beard_edit,
@@ -533,6 +538,7 @@ class GrokImagesProvider:
         selfie_path: str,
         reference_path: str,
         beard_reference_path: str | None = None,
+        style_description: str = "",
         hair_color_name: str = "",
         beard_color_name: str = "",
         apply_beard_edit: bool = False,
@@ -552,6 +558,7 @@ class GrokImagesProvider:
             "prompt": build_hair_transformation_prompt(
                 use_composite_input=True,
                 include_beard_reference=bool(beard_reference_path),
+                style_description=style_description,
                 hair_color_name=hair_color_name,
                 beard_color_name=beard_color_name,
                 apply_beard_edit=apply_beard_edit,

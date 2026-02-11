@@ -34,7 +34,8 @@ class HairTransformationPromptTests(SimpleTestCase):
         self.assertIn("operation: hair replacement", lowered)
         self.assertIn("execution guidelines", lowered)
         self.assertIn("strict constraints", lowered)
-        self.assertIn("you may alter the hairline", lowered)
+        self.assertIn("keep face direction exactly the same as image 1", lowered)
+        self.assertNotIn("hairline", lowered)
 
     def test_flash_prompt_set_2_pushes_for_visible_change(self):
         prompt = build_hair_transformation_prompt(
@@ -90,3 +91,63 @@ class HairTransformationPromptTests(SimpleTestCase):
         self.assertIn("image 3 (right): the beard reference", pro_prompt.lower())
         self.assertIn("replace beard shape using image 3", pro_prompt.lower())
         self.assertIn("set beard color to dark brown", pro_prompt.lower())
+
+    def test_prompt_includes_catalog_style_description_when_provided(self):
+        description = "Low taper fade with textured top and soft natural fringe."
+        flash_prompt = build_hair_transformation_prompt(
+            prompt_style=PROMPT_STYLE_FLASH,
+            style_description=description,
+        )
+        pro_prompt = build_hair_transformation_prompt(
+            prompt_style=PROMPT_STYLE_PRO,
+            style_description=description,
+        )
+
+        self.assertIn("additional haircut description from style catalog", flash_prompt.lower())
+        self.assertIn(description.lower(), flash_prompt.lower())
+        self.assertIn("additional haircut description from style catalog", pro_prompt.lower())
+        self.assertIn(description.lower(), pro_prompt.lower())
+
+    def test_prompt_does_not_include_hairline_adjustments(self):
+        flash_prompt = build_hair_transformation_prompt(
+            prompt_style=PROMPT_STYLE_FLASH,
+            prompt_set=5,
+        )
+        pro_prompt = build_hair_transformation_prompt(
+            prompt_style=PROMPT_STYLE_PRO,
+            prompt_set=2,
+        )
+
+        self.assertNotIn("hairline", flash_prompt.lower())
+        self.assertNotIn("hairline", pro_prompt.lower())
+
+    def test_prompt_removes_sideburn_exception_when_beard_is_unchanged(self):
+        flash_prompt = build_hair_transformation_prompt(prompt_style=PROMPT_STYLE_FLASH)
+        pro_prompt = build_hair_transformation_prompt(prompt_style=PROMPT_STYLE_PRO)
+
+        self.assertIn("keep beard shape and color unchanged.", flash_prompt.lower())
+        self.assertIn("beard: keep beard shape and color unchanged.", pro_prompt.lower())
+        self.assertNotIn("unless sideburns", flash_prompt.lower())
+        self.assertNotIn("unless sideburns", pro_prompt.lower())
+
+    def test_hair_color_is_embedded_in_style_instructions_when_selected(self):
+        flash_prompt = build_hair_transformation_prompt(
+            prompt_style=PROMPT_STYLE_FLASH,
+            hair_color_name="Auburn",
+        )
+        pro_prompt = build_hair_transformation_prompt(
+            prompt_style=PROMPT_STYLE_PRO,
+            hair_color_name="Auburn",
+        )
+
+        self.assertIn("in auburn color", flash_prompt.lower())
+        self.assertIn("in auburn color", pro_prompt.lower())
+        self.assertNotIn("hair color:", flash_prompt.lower())
+        self.assertNotIn("hair color:", pro_prompt.lower())
+
+    def test_hair_color_is_not_mentioned_when_not_selected(self):
+        flash_prompt = build_hair_transformation_prompt(prompt_style=PROMPT_STYLE_FLASH)
+        pro_prompt = build_hair_transformation_prompt(prompt_style=PROMPT_STYLE_PRO)
+
+        self.assertNotIn("hair color", flash_prompt.lower())
+        self.assertNotIn("hair color", pro_prompt.lower())

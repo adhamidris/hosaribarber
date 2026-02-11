@@ -14,7 +14,7 @@ from .models import (
 class PlaygroundStyleAdmin(admin.ModelAdmin):
     list_display = ("name", "is_active", "sort_order", "updated_at")
     list_filter = ("is_active",)
-    search_fields = ("name",)
+    search_fields = ("name", "description")
     ordering = ("sort_order", "id")
 
 

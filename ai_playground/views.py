@@ -646,6 +646,7 @@ def generate_preview(request: HttpRequest):
             selfie_path=generation.selfie_image.path,
             reference_path=reference_path,
             beard_reference_path=beard_reference_path,
+            style_description=style.description if style and style.description else "",
             hair_color_name=hair_color_option.name if hair_color_option else "",
             beard_color_name=beard_color_option.name if beard_color_option else "",
             apply_beard_edit=beard_style is not None,

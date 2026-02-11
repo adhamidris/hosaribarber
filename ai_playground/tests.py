@@ -1,5 +1,6 @@
 import base64
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core import signing
@@ -79,6 +80,7 @@ class PlaygroundApiTests(TestCase):
         style_image = SimpleUploadedFile("style.jpg", b"fake-image-content", content_type="image/jpeg")
         self.active_style = PlaygroundStyle.objects.create(
             name="Classic Fade",
+            description="Classic low fade with short textured top.",
             image=style_image,
             is_active=True,
             sort_order=1,
@@ -250,6 +252,38 @@ class PlaygroundApiTests(TestCase):
 
         session.refresh_from_db()
         self.assertEqual(session.generation_count, 1)
+
+    def test_generate_passes_curated_style_description_to_provider(self):
+        self.active_style.description = "Textured crop with low fade and short blunt fringe."
+        self.active_style.save(update_fields=["description"])
+        self._start_session()
+        self.client.post(
+            reverse("ai-playground-selfie-upload"),
+            {"image": self._image_file("selfie.jpg")},
+        )
+
+        with patch(
+            "ai_playground.views.generate_hair_preview",
+            return_value=SimpleNamespace(
+                image_bytes=b"fake-image-content",
+                mime_type="image/png",
+                provider="stub",
+            ),
+        ) as mocked_generate:
+            response = self.client.post(
+                reverse("ai-playground-generate"),
+                {
+                    "style_id": str(self.active_style.id),
+                    **self._selection_payload(),
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mocked_generate.assert_called_once()
+        self.assertEqual(
+            mocked_generate.call_args.kwargs["style_description"],
+            self.active_style.description,
+        )
 
     def test_home_restores_latest_generation_after_refresh(self):
         self._start_session()

@@ -18,6 +18,7 @@ def _default_session_expiry():
 
 class PlaygroundStyle(models.Model):
     name = models.CharField(max_length=120, blank=True, null=True)
+    description = models.TextField(blank=True, default="")
     image = models.ImageField(upload_to="ai-playground/styles/%Y/%m/%d")
     is_active = models.BooleanField(default=True)
     sort_order = models.PositiveIntegerField(default=0)

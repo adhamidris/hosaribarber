@@ -16,6 +16,20 @@ def _resolve_prompt_set(prompt_set: int | str | None) -> int:
     return PROMPT_SET_DEFAULT
 
 
+def _normalize_style_description(style_description: str) -> str:
+    return " ".join(str(style_description or "").split()).strip()
+
+
+def _inject_hair_color_into_style_instruction(style_instruction: str, hair_color_name: str) -> str:
+    normalized_hair_color = (hair_color_name or "").strip()
+    if not normalized_hair_color:
+        return style_instruction
+    trimmed_instruction = style_instruction.rstrip()
+    if trimmed_instruction.endswith("."):
+        trimmed_instruction = trimmed_instruction[:-1]
+    return f"{trimmed_instruction} in {normalized_hair_color} color."
+
+
 def _flash_input_context_instruction(use_composite_input: bool, with_beard_reference: bool) -> str:
     if use_composite_input:
         if with_beard_reference:
@@ -53,21 +67,25 @@ def _build_flash_prompt(
     *,
     use_composite_input: bool,
     include_beard_reference: bool,
+    style_description: str,
     hair_color_name: str,
     beard_color_name: str,
     apply_beard_edit: bool,
     prompt_set: int,
 ) -> str:
+    normalized_style_description = _normalize_style_description(style_description)
     normalized_hair_color = (hair_color_name or "").strip()
     normalized_beard_color = (beard_color_name or "").strip()
     with_beard_reference = include_beard_reference and apply_beard_edit
     resolved_prompt_set = _resolve_prompt_set(prompt_set)
-
-    hair_color_instruction = (
-        f"Set scalp hair color to {normalized_hair_color}."
-        if normalized_hair_color
-        else "Keep scalp hair color natural."
+    style_description_instruction = (
+        "Additional haircut description from style catalog: "
+        f"{normalized_style_description}. "
+        "Use this text together with Image 2 to improve haircut matching."
+        if normalized_style_description
+        else ""
     )
+
     if with_beard_reference:
         beard_instruction = "Use Image 3 as beard reference and blend sideburns naturally into the haircut."
         beard_color_instruction = (
@@ -76,7 +94,7 @@ def _build_flash_prompt(
             else "Keep beard color natural."
         )
     else:
-        beard_instruction = "Keep beard shape and color unchanged, except needed sideburn blending."
+        beard_instruction = "Keep beard shape and color unchanged."
         beard_color_instruction = ""
 
     if resolved_prompt_set == 2:
@@ -86,14 +104,12 @@ def _build_flash_prompt(
             "Do not preserve old hair shape, length, or volume.",
             "Haircut match must be obvious: same silhouette, same fringe or part direction, same top mass, and same side/fade flow.",
             "If the result looks unchanged, regenerate with stronger replacement.",
-            "You may modify hairline placement to fit the target style.",
         )
     elif resolved_prompt_set == 3:
         style_instructions = (
             "Replace only scalp hair in Image 1 with the hairstyle from Image 2.",
             "Match the reference haircut shape clearly, including top volume, part/fringe direction, and side taper.",
             "Prioritize haircut similarity over the original hairstyle.",
-            "Adjust hairline when required for accurate style transfer.",
         )
     elif resolved_prompt_set == 4:
         style_instructions = (
@@ -108,24 +124,28 @@ def _build_flash_prompt(
             "Replace the hairstyle in Image 1 with the hairstyle from Image 2.",
             "Reference haircut is the source of truth. Do not keep the original haircut shape.",
             "Match the reference overall silhouette, total length, top volume, fringe/part direction, and side/fade shape.",
-            "You may fully adapt the hairline to fit the reference style.",
         )
     else:
         style_instructions = (
             "Use Image 2 as the haircut target for Image 1.",
             "Fully replace the current hairstyle in Image 1. Do not preserve the original hair shape or volume.",
             "Match the reference hairstyle clearly: silhouette, fringe/part direction, top volume, and side/fade shape.",
-            "You may adapt the hairline if needed so the reference style fits correctly.",
+        )
+    if style_instructions:
+        style_instructions = (
+            _inject_hair_color_into_style_instruction(style_instructions[0], normalized_hair_color),
+            *style_instructions[1:],
         )
 
     return " ".join(
         part
         for part in (
             _flash_input_context_instruction(use_composite_input, with_beard_reference),
+            style_description_instruction,
             *style_instructions,
             "Keep face, skin tone, body, and clothing unchanged.",
+            "Keep face direction exactly the same as Image 1.",
             "Keep background, camera angle, and lighting unchanged.",
-            hair_color_instruction,
             beard_instruction,
             beard_color_instruction,
             "Return one realistic portrait image only.",
@@ -138,21 +158,25 @@ def _build_pro_prompt(
     *,
     use_composite_input: bool,
     include_beard_reference: bool,
+    style_description: str,
     hair_color_name: str,
     beard_color_name: str,
     apply_beard_edit: bool,
     prompt_set: int,
 ) -> str:
+    normalized_style_description = _normalize_style_description(style_description)
     normalized_hair_color = (hair_color_name or "").strip()
     normalized_beard_color = (beard_color_name or "").strip()
     with_beard_reference = include_beard_reference and apply_beard_edit
     resolved_prompt_set = _resolve_prompt_set(prompt_set)
-
-    hair_color_instruction = (
-        f"HAIR COLOR: Set scalp hair color to {normalized_hair_color}."
-        if normalized_hair_color
-        else "HAIR COLOR: Keep scalp hair color natural."
+    style_description_instruction = (
+        "REFERENCE TEXT: Additional haircut description from style catalog: "
+        f"{normalized_style_description}. "
+        "Use this text together with Image 2 to improve haircut matching."
+        if normalized_style_description
+        else ""
     )
+
     if with_beard_reference:
         beard_instruction = "BEARD: Replace beard shape using Image 3, blending sideburns naturally into the haircut."
         beard_color_instruction = (
@@ -161,10 +185,7 @@ def _build_pro_prompt(
             else "Keep beard color natural."
         )
     else:
-        beard_instruction = (
-            "BEARD: Keep beard shape and color unchanged "
-            "(unless sideburns need to be blended into the new haircut)."
-        )
+        beard_instruction = "BEARD: Keep beard shape and color unchanged."
         beard_color_instruction = ""
 
     if resolved_prompt_set == 2:
@@ -173,9 +194,7 @@ def _build_pro_prompt(
             "1. REPLACE: Completely remove the subject's original hairstyle. "
             "Do not let the original hair volume or shape limit the new style. "
             "2. MATCH: Visibly transfer the structure of the reference hairstyle to the subject. "
-            "You must match the reference silhouette, fringe direction, top volume, side/fade gradation, and parting. "
-            "3. ADAPT: You may alter the subject hairline to fit the new style. "
-            "Prioritize the reference style over the original hairline shape."
+            "You must match the reference silhouette, fringe direction, top volume, side/fade gradation, and parting."
         )
     elif resolved_prompt_set == 3:
         process_instruction = (
@@ -193,16 +212,16 @@ def _build_pro_prompt(
     elif resolved_prompt_set == 5:
         process_instruction = (
             "Execution Guidelines: Edit scalp hair only. Replace the hairstyle in Image 1 with Image 2 and treat the reference "
-            "as the source of truth. Match silhouette, total length, top volume, fringe/part direction, and side/fade shape. "
-            "You may fully adapt hairline placement to fit the reference."
+            "as the source of truth. Match silhouette, total length, top volume, fringe/part direction, and side/fade shape."
         )
     else:
         process_instruction = (
             "Execution Guidelines: Replace the hair in Image 1 with the hairstyle in Image 2. "
             "Fully remove original hairstyle constraints and transfer the reference haircut structure, including silhouette, "
-            "fringe/part direction, top volume, side/fade gradation, and parting. "
-            "You may alter the hairline to fit the target style."
+            "fringe/part direction, top volume, side/fade gradation, and parting."
         )
+    if normalized_hair_color:
+        process_instruction = f"{process_instruction} Apply the hairstyle in {normalized_hair_color} color."
 
     return " ".join(
         part
@@ -210,10 +229,11 @@ def _build_pro_prompt(
             "Operation: Hair Replacement.",
             _pro_input_context_instruction(use_composite_input, with_beard_reference),
             "Primary Instruction: Create a realistic haircut simulation using the reference hairstyle.",
+            style_description_instruction,
             process_instruction,
             "Strict Constraints: IDENTITY: Keep the face, skin tone, body, and clothing of Image 1 exactly unchanged.",
+            "POSE: Keep face direction exactly the same as Image 1.",
             "ENVIRONMENT: Keep the background, camera angle, and lighting of Image 1 exactly unchanged.",
-            hair_color_instruction,
             beard_instruction,
             beard_color_instruction,
             "OUTPUT: Return a single, high-fidelity portrait image.",
@@ -226,6 +246,7 @@ def build_hair_transformation_prompt(
     *,
     use_composite_input: bool = False,
     include_beard_reference: bool = False,
+    style_description: str = "",
     hair_color_name: str = "",
     beard_color_name: str = "",
     apply_beard_edit: bool = False,
@@ -238,6 +259,7 @@ def build_hair_transformation_prompt(
         return _build_flash_prompt(
             use_composite_input=use_composite_input,
             include_beard_reference=include_beard_reference,
+            style_description=style_description,
             hair_color_name=hair_color_name,
             beard_color_name=beard_color_name,
             apply_beard_edit=apply_beard_edit,
@@ -246,6 +268,7 @@ def build_hair_transformation_prompt(
     return _build_pro_prompt(
         use_composite_input=use_composite_input,
         include_beard_reference=include_beard_reference,
+        style_description=style_description,
         hair_color_name=hair_color_name,
         beard_color_name=beard_color_name,
         apply_beard_edit=apply_beard_edit,
