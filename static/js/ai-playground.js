@@ -4,6 +4,7 @@
 
   const uploadUrl = root.dataset.selfieUploadUrl;
   const generateUrl = root.dataset.generateUrl;
+  const generateExpertUrl = root.dataset.generateExpertUrl;
   const initialHasSelfie = root.dataset.hasSelfie === "true";
   const initialSelfieUrl = root.dataset.selfieUrl || "";
 
@@ -37,6 +38,10 @@
     generateCtaReady: root.dataset.msgGenerateCtaReady || "Generate",
     generateCtaPrompt:
       root.dataset.msgGenerateCtaPrompt || "Choose a Hair/Beard style to generate",
+    expertGenerateStarted:
+      root.dataset.msgExpertGenerateStarted || "Generating expert haircut recommendation...",
+    expertModalRequired:
+      root.dataset.msgExpertModalRequired || "Select expert options first.",
   };
 
   const selfieStep = document.getElementById("selfie-step");
@@ -51,6 +56,7 @@
   const selfieTakePhotoBtn = document.getElementById("selfie-take-photo-btn");
   const selfieReplaceBtn = document.getElementById("selfie-replace-btn");
   const selfieGenerateBtn = document.getElementById("selfie-generate-btn");
+  const selfieExpertGenerateBtn = document.getElementById("selfie-expert-generate-btn");
   const selfieInput = document.getElementById("selfie-input");
   const selfieUploadZone = document.getElementById("selfie-upload-zone");
   const selfieUploadFilename = document.getElementById("selfie-upload-filename");
@@ -68,6 +74,13 @@
   const generateLoader = document.getElementById("generate-loader");
   const generateStatus = document.getElementById("generate-status");
   const generatedResultImage = document.getElementById("generated-result-image");
+  const expertOptionsModal = document.getElementById("expert-options-modal");
+  const expertOptionsForm = document.getElementById("expert-options-form");
+  const expertOptionsCancelBtn = document.getElementById("expert-options-cancel-btn");
+  const expertStyleVibe = document.getElementById("expert-style-vibe");
+  const expertLifestyle = document.getElementById("expert-lifestyle");
+  const expertMaintenance = document.getElementById("expert-maintenance");
+  const expertHairLength = document.getElementById("expert-hair-length");
   let hasSelfie = initialHasSelfie;
   let savedSelfieUrl = initialSelfieUrl;
   let pendingPreviewUrl = "";
@@ -269,14 +282,23 @@
   }
 
   function updateGenerateActionCta() {
-    if (!selfieGenerateBtn) return;
-    const hasStyleSelection = hasChosenLookStyle();
-    const label = hasStyleSelection ? messages.generateCtaReady : messages.generateCtaPrompt;
-    selfieGenerateBtn.textContent = label;
-    const disabled = !hasSelfie || isGenerating || isSelfieUploading || !hasStyleSelection;
-    selfieGenerateBtn.disabled = disabled;
-    selfieGenerateBtn.setAttribute("aria-disabled", disabled ? "true" : "false");
-    selfieGenerateBtn.classList.toggle("btn-outline", !hasStyleSelection);
+    if (selfieGenerateBtn) {
+      const hasStyleSelection = hasChosenLookStyle();
+      const label = hasStyleSelection ? messages.generateCtaReady : messages.generateCtaPrompt;
+      selfieGenerateBtn.textContent = label;
+      const disabled = !hasSelfie || isGenerating || isSelfieUploading || !hasStyleSelection;
+      selfieGenerateBtn.disabled = disabled;
+      selfieGenerateBtn.setAttribute("aria-disabled", disabled ? "true" : "false");
+      selfieGenerateBtn.classList.toggle("btn-outline", !hasStyleSelection);
+    }
+    updateExpertActionCta();
+  }
+
+  function updateExpertActionCta() {
+    if (!selfieExpertGenerateBtn) return;
+    const disabled = !hasSelfie || isGenerating || isSelfieUploading;
+    selfieExpertGenerateBtn.disabled = disabled;
+    selfieExpertGenerateBtn.setAttribute("aria-disabled", disabled ? "true" : "false");
   }
 
   function updateSelectionStatus() {
@@ -520,7 +542,9 @@
     await autoSaveSelfie(file);
   }
 
-  async function submitGeneration(formData) {
+  async function submitGeneration(formData, options = {}) {
+    const endpoint = options.url || generateUrl;
+    const startedMessage = options.startedMessage || messages.generateStarted;
     if (!hasSelfie) {
       setGenerateStatus(messages.selfieRequired, true);
       guideToSelfieStep();
@@ -531,11 +555,11 @@
     isGenerating = true;
     setStyleStepEnabled(true);
     setGenerateLoading(true);
-    setGenerateStatus(messages.generateStarted, false);
+    setGenerateStatus(startedMessage, false);
 
     try {
       const csrfToken = getCookie("csrftoken");
-      const response = await fetch(generateUrl, {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: csrfToken ? { "X-CSRFToken": csrfToken } : {},
         credentials: "same-origin",
@@ -569,6 +593,21 @@
       setGenerateLoading(false);
       setStyleStepEnabled(true);
     }
+  }
+
+  function openExpertOptionsModal() {
+    if (!expertOptionsModal) return;
+    expertOptionsModal.classList.remove("hidden");
+    expertOptionsModal.setAttribute("aria-hidden", "false");
+    if (expertStyleVibe && typeof expertStyleVibe.focus === "function") {
+      window.setTimeout(() => expertStyleVibe.focus(), 10);
+    }
+  }
+
+  function closeExpertOptionsModal() {
+    if (!expertOptionsModal) return;
+    expertOptionsModal.classList.add("hidden");
+    expertOptionsModal.setAttribute("aria-hidden", "true");
   }
 
   async function captureSelfieFromCamera() {
@@ -761,6 +800,62 @@
       await triggerGenerationRequest();
     });
   }
+
+  if (selfieExpertGenerateBtn) {
+    selfieExpertGenerateBtn.addEventListener("click", () => {
+      if (!hasSelfie) {
+        setGenerateStatus(messages.selfieRequired, true);
+        guideToSelfieStep();
+        return;
+      }
+      openExpertOptionsModal();
+    });
+  }
+
+  if (expertOptionsCancelBtn) {
+    expertOptionsCancelBtn.addEventListener("click", () => {
+      closeExpertOptionsModal();
+    });
+  }
+
+  if (expertOptionsModal) {
+    expertOptionsModal.addEventListener("click", (event) => {
+      if (event.target === expertOptionsModal) {
+        closeExpertOptionsModal();
+      }
+    });
+  }
+
+  if (expertOptionsForm) {
+    expertOptionsForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const styleVibe = expertStyleVibe?.value || "";
+      const lifestyle = expertLifestyle?.value || "";
+      const maintenance = expertMaintenance?.value || "";
+      const hairLength = expertHairLength?.value || "";
+      if (!styleVibe || !lifestyle || !maintenance || !hairLength) {
+        setGenerateStatus(messages.expertModalRequired, true);
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("style_vibe", styleVibe);
+      formData.append("lifestyle", lifestyle);
+      formData.append("maintenance", maintenance);
+      formData.append("hair_length", hairLength);
+      closeExpertOptionsModal();
+      await submitGeneration(formData, {
+        url: generateExpertUrl || generateUrl,
+        startedMessage: messages.expertGenerateStarted,
+      });
+    });
+  }
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && expertOptionsModal && !expertOptionsModal.classList.contains("hidden")) {
+      closeExpertOptionsModal();
+    }
+  });
 
   enableZoneKeyboardSupport(selfieUploadZone, selfieInput);
   attachDropzone(selfieUploadZone, selfieInput, async (file) => {

@@ -1,4 +1,5 @@
 import hashlib
+import json
 from datetime import timedelta
 from time import perf_counter
 
@@ -23,6 +24,7 @@ from .models import (
     PlaygroundSession,
     PlaygroundStyle,
 )
+from .prompts import PROMPT_MODE_EXPERT
 from .services import (
     PlaygroundProviderError,
     configured_provider_name,
@@ -41,6 +43,16 @@ SESSION_MAX_AGE_SECONDS = SESSION_DURATION_MINUTES * 60
 SESSION_COOKIE_SECURE = bool(getattr(settings, "AI_PLAYGROUND_SESSION_COOKIE_SECURE", not settings.DEBUG))
 ALLOWED_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 NONE_SELECTION_VALUE = "none"
+EXPERT_STYLE_VIBE_OPTIONS = {"classic", "casual", "modern", "bold"}
+EXPERT_LIFESTYLE_OPTIONS = {"office", "active", "creative", "balanced"}
+EXPERT_MAINTENANCE_OPTIONS = {"low", "medium", "high"}
+EXPERT_HAIR_LENGTH_OPTIONS = {"short", "medium", "long"}
+EXPERT_DEFAULT_PREFERENCES = {
+    "style_vibe": "classic",
+    "lifestyle": "balanced",
+    "maintenance": "medium",
+    "hair_length": "short",
+}
 
 SESSION_REQUIRED_MESSAGE = "Session expired. Scan the QR code again."
 
@@ -184,7 +196,27 @@ def _parse_choice_value(raw_value: str) -> tuple[str, bool]:
     return normalized, True
 
 
-def _generation_payload(generation: PlaygroundGeneration, session_generation_count: int) -> dict:
+def _parse_expert_choice(*, raw_value: str, field_name: str, options: set[str], default_value: str) -> tuple[str, str]:
+    normalized = (raw_value or "").strip().lower()
+    if not normalized:
+        return default_value, ""
+    if normalized in options:
+        return normalized, ""
+    allowed_values = ", ".join(sorted(options))
+    return "", f"Invalid {field_name} selection. Allowed values: {allowed_values}."
+
+
+def _expert_preferences_fingerprint(preferences: dict[str, str]) -> str:
+    serialized = json.dumps(preferences, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(f"expert:{serialized}".encode("utf-8")).hexdigest()
+
+
+def _generation_payload(
+    generation: PlaygroundGeneration,
+    session_generation_count: int,
+    *,
+    source_override: str = "",
+) -> dict:
     style = generation.style
     beard_style = generation.beard_style
     hair_color = generation.hair_color_option
@@ -196,7 +228,7 @@ def _generation_payload(generation: PlaygroundGeneration, session_generation_cou
         "created_at": generation.created_at.isoformat(),
         "processing_ms": generation.processing_ms,
         "session_generation_count": session_generation_count,
-        "source": "curated" if style else "custom",
+        "source": source_override or ("curated" if style else "custom"),
         "style_name": style.name if style and style.name else "",
         "beard_style_name": beard_style.name if beard_style and beard_style.name else "",
         "hair_color_name": hair_color.name if hair_color else "",
@@ -686,6 +718,215 @@ def generate_preview(request: HttpRequest):
                 generation,
                 session_generation_count=current_generation_count,
             ),
+        },
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@require_POST
+def generate_expert_preview(request: HttpRequest):
+    session = _get_active_session(request)
+    if session is None:
+        return _session_required_response()
+    if not session.has_selfie:
+        return JsonResponse({"ok": False, "error": "Upload a selfie first."}, status=400)
+
+    style_vibe, style_vibe_error = _parse_expert_choice(
+        raw_value=request.POST.get("style_vibe", ""),
+        field_name="style vibe",
+        options=EXPERT_STYLE_VIBE_OPTIONS,
+        default_value=EXPERT_DEFAULT_PREFERENCES["style_vibe"],
+    )
+    if style_vibe_error:
+        return JsonResponse({"ok": False, "error": style_vibe_error}, status=400)
+    lifestyle, lifestyle_error = _parse_expert_choice(
+        raw_value=request.POST.get("lifestyle", ""),
+        field_name="lifestyle",
+        options=EXPERT_LIFESTYLE_OPTIONS,
+        default_value=EXPERT_DEFAULT_PREFERENCES["lifestyle"],
+    )
+    if lifestyle_error:
+        return JsonResponse({"ok": False, "error": lifestyle_error}, status=400)
+    maintenance, maintenance_error = _parse_expert_choice(
+        raw_value=request.POST.get("maintenance", ""),
+        field_name="maintenance",
+        options=EXPERT_MAINTENANCE_OPTIONS,
+        default_value=EXPERT_DEFAULT_PREFERENCES["maintenance"],
+    )
+    if maintenance_error:
+        return JsonResponse({"ok": False, "error": maintenance_error}, status=400)
+    hair_length, hair_length_error = _parse_expert_choice(
+        raw_value=request.POST.get("hair_length", ""),
+        field_name="hair length",
+        options=EXPERT_HAIR_LENGTH_OPTIONS,
+        default_value=EXPERT_DEFAULT_PREFERENCES["hair_length"],
+    )
+    if hair_length_error:
+        return JsonResponse({"ok": False, "error": hair_length_error}, status=400)
+
+    expert_preferences = {
+        "style_vibe": style_vibe,
+        "lifestyle": lifestyle,
+        "maintenance": maintenance,
+        "hair_length": hair_length,
+    }
+    expert_fingerprint = _expert_preferences_fingerprint(expert_preferences)
+
+    ip_address = _client_ip(request)
+    generate_rate_limit_per_ip_per_hour = _int_setting("AI_PLAYGROUND_GENERATE_MAX_PER_IP_PER_HOUR", 60)
+    session_generation_limit = _int_setting("AI_PLAYGROUND_SESSION_GENERATION_LIMIT", 5)
+    generate_min_interval_seconds = _int_setting("AI_PLAYGROUND_MIN_GENERATE_INTERVAL_SECONDS", 10)
+
+    with transaction.atomic():
+        locked_session = PlaygroundSession.objects.select_for_update().get(id=session.id)
+        locked_selfie_name = locked_session.selfie_image.name
+
+        existing_generation = (
+            PlaygroundGeneration.objects.filter(
+                session=locked_session,
+                style__isnull=True,
+                beard_style__isnull=True,
+                hair_color_option__isnull=True,
+                beard_color_option__isnull=True,
+                custom_style_fingerprint=expert_fingerprint,
+                selfie_image=locked_selfie_name,
+                status=PlaygroundGenerationStatusChoices.SUCCEEDED,
+            )
+            .exclude(result_image="")
+            .order_by("-created_at")
+            .first()
+        )
+        if existing_generation is not None:
+            locked_session.touch(
+                ip_address=ip_address,
+                user_agent=request.META.get("HTTP_USER_AGENT", ""),
+            )
+            locked_session.save(update_fields=["last_seen_at", "last_ip", "user_agent"])
+            response = JsonResponse(
+                {
+                    "ok": True,
+                    "reused": True,
+                    "message": "Using existing expert preview from this session.",
+                    "generation": {
+                        **_generation_payload(
+                            existing_generation,
+                            session_generation_count=locked_session.generation_count,
+                            source_override="expert",
+                        ),
+                        "expert_preferences": expert_preferences,
+                    },
+                }
+            )
+            response["Cache-Control"] = "no-store"
+            return response
+
+        if _is_ip_rate_limited(
+            action=PlaygroundRateLimitActionChoices.GENERATE,
+            ip_address=ip_address,
+            limit_per_hour=generate_rate_limit_per_ip_per_hour,
+        ):
+            return _rate_limited_response(
+                "Generation rate limit reached on this network. Please try again shortly.",
+                retry_after_seconds=60,
+            )
+
+        if locked_session.generation_count >= session_generation_limit:
+            return _rate_limited_response(
+                "Session generation quota reached. Please rescan the QR code for a new session."
+            )
+
+        if generate_min_interval_seconds > 0 and locked_session.last_generation_at:
+            elapsed_seconds = int((timezone.now() - locked_session.last_generation_at).total_seconds())
+            if elapsed_seconds < generate_min_interval_seconds:
+                retry_after = max(1, generate_min_interval_seconds - elapsed_seconds)
+                return _rate_limited_response(
+                    "Please wait a few seconds before starting another generation.",
+                    retry_after_seconds=retry_after,
+                )
+
+        locked_session.touch(
+            ip_address=ip_address,
+            user_agent=request.META.get("HTTP_USER_AGENT", ""),
+        )
+        locked_session.generation_count += 1
+        locked_session.last_generation_at = timezone.now()
+        locked_session.save(
+            update_fields=[
+                "generation_count",
+                "last_generation_at",
+                "last_seen_at",
+                "last_ip",
+                "user_agent",
+            ]
+        )
+        current_generation_count = locked_session.generation_count
+
+        generation = PlaygroundGeneration.objects.create(
+            session=locked_session,
+            selfie_image=locked_session.selfie_image.name,
+            custom_style_fingerprint=expert_fingerprint,
+            provider="nanobanana",
+            status=PlaygroundGenerationStatusChoices.PENDING,
+        )
+        _record_rate_limit_event(
+            action=PlaygroundRateLimitActionChoices.GENERATE,
+            ip_address=ip_address,
+            session=locked_session,
+        )
+
+    started = perf_counter()
+    try:
+        provider_result = generate_hair_preview(
+            selfie_path=generation.selfie_image.path,
+            reference_path=generation.selfie_image.path,
+            style_description="",
+            hair_color_name="",
+            beard_color_name="",
+            apply_beard_edit=False,
+            prompt_mode=PROMPT_MODE_EXPERT,
+            expert_preferences=expert_preferences,
+            provider_override="nanobanana",
+        )
+        extension = extension_from_mime(provider_result.mime_type)
+        result_filename = f"generation-{generation.id}.{extension}"
+        generation.result_image.save(
+            result_filename,
+            ContentFile(provider_result.image_bytes),
+            save=False,
+        )
+        generation.status = PlaygroundGenerationStatusChoices.SUCCEEDED
+        generation.provider = provider_result.provider
+        generation.processing_ms = int((perf_counter() - started) * 1000)
+        generation.error_message = ""
+        generation.save(update_fields=["status", "provider", "processing_ms", "error_message", "result_image", "updated_at"])
+    except PlaygroundProviderError as error:
+        generation.status = PlaygroundGenerationStatusChoices.FAILED
+        generation.processing_ms = int((perf_counter() - started) * 1000)
+        generation.error_message = str(error)[:255]
+        generation.save(update_fields=["status", "processing_ms", "error_message", "updated_at"])
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "Generation failed. Please retry in a moment.",
+                "provider": generation.provider,
+                "details": str(error) if settings.DEBUG else "",
+            },
+            status=502,
+        )
+
+    response = JsonResponse(
+        {
+            "ok": True,
+            "message": "Expert generation completed.",
+            "generation": {
+                **_generation_payload(
+                    generation,
+                    session_generation_count=current_generation_count,
+                    source_override="expert",
+                ),
+                "expert_preferences": expert_preferences,
+            },
         },
     )
     response["Cache-Control"] = "no-store"

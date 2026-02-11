@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    generate_expert_preview,
     generate_preview,
     playground_home,
     start_session,
@@ -14,4 +15,5 @@ urlpatterns = [
     path("api/styles/", styles_api, name="ai-playground-styles"),
     path("api/selfie/", upload_selfie, name="ai-playground-selfie-upload"),
     path("api/generate/", generate_preview, name="ai-playground-generate"),
+    path("api/generate-expert/", generate_expert_preview, name="ai-playground-generate-expert"),
 ]

@@ -18,6 +18,7 @@
     id="ai-playground-root"
     data-selfie-upload-url="{% url 'ai-playground-selfie-upload' %}"
     data-generate-url="{% url 'ai-playground-generate' %}"
+    data-generate-expert-url="{% url 'ai-playground-generate-expert' %}"
     data-styles-url="{% url 'ai-playground-styles' %}"
     data-has-selfie="{% if active_session.has_selfie %}true{% else %}false{% endif %}"
     data-selfie-url="{% if active_session.selfie_image %}{{ active_session.selfie_image.url }}{% endif %}"
@@ -43,6 +44,8 @@
     data-msg-generate-complete="{% trans 'Preview is ready.' %}"
     data-msg-generate-cta-ready="{% trans 'Generate' %}"
     data-msg-generate-cta-prompt="{% trans 'Choose a Hair/Beard style to generate' %}"
+    data-msg-expert-generate-started="{% trans 'Request sent. Building expert haircut recommendation...' %}"
+    data-msg-expert-modal-required="{% trans 'Select expert options first.' %}"
 >
     <div class="ai-main-layout">
         <aside id="style-step" class="card ai-playground-card ai-main-side-panel">
@@ -291,6 +294,59 @@
                         <button id="selfie-generate-btn" type="button" class="btn btn-sm">
                             {% trans "Choose a Hair/Beard style to generate" %}
                         </button>
+                        <button id="selfie-expert-generate-btn" type="button" class="btn btn-outline btn-sm ai-expert-cta">
+                            {% trans "Generate Expert Haircut" %}
+                        </button>
+                    </div>
+                    <div id="expert-options-modal" class="ai-expert-modal hidden" role="dialog" aria-modal="true" aria-labelledby="expert-options-title">
+                        <div class="ai-expert-modal-surface">
+                            <h3 id="expert-options-title">{% trans "Expert Haircut Preferences" %}</h3>
+                            <p class="muted">{% trans "Guide the AI stylist before generating your face-fit haircut." %}</p>
+                            <form id="expert-options-form" class="ai-expert-form">
+                                <label class="ai-expert-field" for="expert-style-vibe">
+                                    <span>{% trans "Style vibe" %}</span>
+                                    <select id="expert-style-vibe" name="style_vibe">
+                                        <option value="classic">{% trans "Classic" %}</option>
+                                        <option value="casual">{% trans "Casual" %}</option>
+                                        <option value="modern">{% trans "Modern" %}</option>
+                                        <option value="bold">{% trans "Bold" %}</option>
+                                    </select>
+                                </label>
+                                <label class="ai-expert-field" for="expert-lifestyle">
+                                    <span>{% trans "Lifestyle" %}</span>
+                                    <select id="expert-lifestyle" name="lifestyle">
+                                        <option value="balanced">{% trans "Balanced" %}</option>
+                                        <option value="office">{% trans "Office" %}</option>
+                                        <option value="active">{% trans "Active" %}</option>
+                                        <option value="creative">{% trans "Creative" %}</option>
+                                    </select>
+                                </label>
+                                <label class="ai-expert-field" for="expert-maintenance">
+                                    <span>{% trans "Maintenance" %}</span>
+                                    <select id="expert-maintenance" name="maintenance">
+                                        <option value="medium">{% trans "Medium" %}</option>
+                                        <option value="low">{% trans "Low" %}</option>
+                                        <option value="high">{% trans "High" %}</option>
+                                    </select>
+                                </label>
+                                <label class="ai-expert-field" for="expert-hair-length">
+                                    <span>{% trans "Hair length" %}</span>
+                                    <select id="expert-hair-length" name="hair_length">
+                                        <option value="short">{% trans "Short" %}</option>
+                                        <option value="medium">{% trans "Medium" %}</option>
+                                        <option value="long">{% trans "Long" %}</option>
+                                    </select>
+                                </label>
+                                <div class="ai-expert-actions">
+                                    <button id="expert-options-cancel-btn" type="button" class="btn btn-outline btn-sm">
+                                        {% trans "Cancel" %}
+                                    </button>
+                                    <button id="expert-options-submit-btn" type="submit" class="btn btn-sm">
+                                        {% trans "Generate Expert Haircut" %}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
                     </div>
                 </div>
                 <p id="selfie-status" class="muted hidden"></p>

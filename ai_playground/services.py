@@ -14,6 +14,8 @@ from django.conf import settings
 from PIL import Image
 
 from .prompts import (
+    PROMPT_MODE_CATALOG,
+    PROMPT_MODE_EXPERT,
     PROMPT_STYLE_FLASH,
     PROMPT_STYLE_PRO,
     build_hair_transformation_prompt,
@@ -74,8 +76,11 @@ def generate_hair_preview(
     hair_color_name: str = "",
     beard_color_name: str = "",
     apply_beard_edit: bool = False,
+    prompt_mode: str = PROMPT_MODE_CATALOG,
+    expert_preferences: dict[str, str] | None = None,
+    provider_override: str = "",
 ) -> PlaygroundImageResult:
-    provider_name = configured_provider_name()
+    provider_name = str(provider_override or "").strip().lower() or configured_provider_name()
     provider = _provider_factory(provider_name)
     return provider.generate(
         selfie_path=selfie_path,
@@ -85,6 +90,8 @@ def generate_hair_preview(
         hair_color_name=hair_color_name,
         beard_color_name=beard_color_name,
         apply_beard_edit=apply_beard_edit,
+        prompt_mode=prompt_mode,
+        expert_preferences=expert_preferences,
     )
 
 
@@ -362,8 +369,18 @@ class StubProvider:
         hair_color_name: str = "",
         beard_color_name: str = "",
         apply_beard_edit: bool = False,
+        prompt_mode: str = PROMPT_MODE_CATALOG,
+        expert_preferences: dict[str, str] | None = None,
     ) -> PlaygroundImageResult:
-        _ = beard_reference_path, style_description, hair_color_name, beard_color_name, apply_beard_edit
+        _ = (
+            beard_reference_path,
+            style_description,
+            hair_color_name,
+            beard_color_name,
+            apply_beard_edit,
+            prompt_mode,
+            expert_preferences,
+        )
         _ = reference_path
         with open(selfie_path, "rb") as file_obj:
             image_bytes = file_obj.read()
@@ -441,26 +458,34 @@ class NanobananaProvider:
         hair_color_name: str = "",
         beard_color_name: str = "",
         apply_beard_edit: bool = False,
+        prompt_mode: str = PROMPT_MODE_CATALOG,
+        expert_preferences: dict[str, str] | None = None,
     ) -> PlaygroundImageResult:
         if not self.api_key:
             raise PlaygroundProviderError("Nanobanana API key is missing.")
 
         resolved_prompt_style = self._resolved_prompt_style()
         resolved_prompt_set = self._resolved_prompt_set()
+        is_expert_mode = str(prompt_mode or "").strip().lower() == PROMPT_MODE_EXPERT
 
         selfie_mime, selfie_b64 = _image_file_as_base64(selfie_path)
-        reference_mime, reference_b64 = _image_file_as_base64(reference_path)
         beard_mime = ""
         beard_b64 = ""
         if beard_reference_path:
             beard_mime, beard_b64 = _image_file_as_base64(beard_reference_path)
 
         content_parts = [
-            {"text": "Image 1 (identity anchor selfie):"},
+            {"text": "Image 1 (identity anchor selfie):" if not is_expert_mode else "Image 1 (subject selfie for expert haircut analysis):"},
             {"inlineData": {"mimeType": selfie_mime, "data": selfie_b64}},
-            {"text": "Image 2 (target hairstyle reference):"},
-            {"inlineData": {"mimeType": reference_mime, "data": reference_b64}},
         ]
+        if not is_expert_mode:
+            reference_mime, reference_b64 = _image_file_as_base64(reference_path)
+            content_parts.extend(
+                [
+                    {"text": "Image 2 (target hairstyle reference):"},
+                    {"inlineData": {"mimeType": reference_mime, "data": reference_b64}},
+                ]
+            )
         if beard_reference_path:
             content_parts.extend(
                 [
@@ -479,6 +504,8 @@ class NanobananaProvider:
                     apply_beard_edit=apply_beard_edit,
                     prompt_style=resolved_prompt_style,
                     prompt_set=resolved_prompt_set,
+                    prompt_mode=prompt_mode,
+                    expert_preferences=expert_preferences,
                 )
             }
         )
@@ -542,6 +569,8 @@ class GrokImagesProvider:
         hair_color_name: str = "",
         beard_color_name: str = "",
         apply_beard_edit: bool = False,
+        prompt_mode: str = PROMPT_MODE_CATALOG,
+        expert_preferences: dict[str, str] | None = None,
     ) -> PlaygroundImageResult:
         if not self.api_key:
             raise PlaygroundProviderError("Grok API key is missing.")
@@ -563,6 +592,8 @@ class GrokImagesProvider:
                 beard_color_name=beard_color_name,
                 apply_beard_edit=apply_beard_edit,
                 prompt_style=PROMPT_STYLE_PRO,
+                prompt_mode=prompt_mode,
+                expert_preferences=expert_preferences,
             ),
             "image_url": data_url,
             "image_format": self.output_format,

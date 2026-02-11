@@ -136,6 +136,21 @@ class PlaygroundApiTests(TestCase):
             "beard_color_option_id": beard_color_option_id,
         }
 
+    @staticmethod
+    def _expert_payload(
+        *,
+        style_vibe: str = "classic",
+        lifestyle: str = "balanced",
+        maintenance: str = "medium",
+        hair_length: str = "short",
+    ) -> dict[str, str]:
+        return {
+            "style_vibe": style_vibe,
+            "lifestyle": lifestyle,
+            "maintenance": maintenance,
+            "hair_length": hair_length,
+        }
+
     def test_styles_api_requires_session(self):
         response = self.client.get(reverse("ai-playground-styles"))
         self.assertEqual(response.status_code, 401)
@@ -206,6 +221,17 @@ class PlaygroundApiTests(TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(PlaygroundGeneration.objects.count(), 0)
 
+    def test_generate_expert_requires_selfie_first(self):
+        self._start_session()
+        response = self.client.post(
+            reverse("ai-playground-generate-expert"),
+            self._expert_payload(),
+        )
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(PlaygroundGeneration.objects.count(), 0)
+
     def test_generate_requires_style_panel_choices(self):
         self._start_session()
         self.client.post(
@@ -248,6 +274,54 @@ class PlaygroundApiTests(TestCase):
         self.assertEqual(generation.style_id, self.active_style.id)
         self.assertEqual(generation.status, "succeeded")
         self.assertEqual(generation.provider, "stub")
+        self.assertTrue(bool(generation.result_image))
+
+        session.refresh_from_db()
+        self.assertEqual(session.generation_count, 1)
+
+    def test_generate_expert_with_preferences_creates_succeeded_generation(self):
+        session = self._start_session()
+        self.client.post(
+            reverse("ai-playground-selfie-upload"),
+            {"image": self._image_file("selfie.jpg")},
+        )
+
+        with patch(
+            "ai_playground.views.generate_hair_preview",
+            return_value=SimpleNamespace(
+                image_bytes=b"fake-image-content",
+                mime_type="image/png",
+                provider="nanobanana",
+            ),
+        ) as mocked_generate:
+            response = self.client.post(
+                reverse("ai-playground-generate-expert"),
+                self._expert_payload(
+                    style_vibe="casual",
+                    lifestyle="active",
+                    maintenance="low",
+                    hair_length="medium",
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["generation"]["source"], "expert")
+        self.assertEqual(payload["generation"]["expert_preferences"]["style_vibe"], "casual")
+        self.assertEqual(payload["generation"]["expert_preferences"]["lifestyle"], "active")
+        self.assertEqual(payload["generation"]["expert_preferences"]["maintenance"], "low")
+        self.assertEqual(payload["generation"]["expert_preferences"]["hair_length"], "medium")
+        self.assertTrue(payload["generation"]["result_url"])
+        mocked_generate.assert_called_once()
+        self.assertEqual(mocked_generate.call_args.kwargs["provider_override"], "nanobanana")
+        self.assertEqual(mocked_generate.call_args.kwargs["prompt_mode"], "expert")
+
+        generation = PlaygroundGeneration.objects.first()
+        self.assertIsNotNone(generation)
+        self.assertIsNone(generation.style)
+        self.assertEqual(generation.status, "succeeded")
+        self.assertEqual(generation.provider, "nanobanana")
         self.assertTrue(bool(generation.result_image))
 
         session.refresh_from_db()
@@ -469,6 +543,48 @@ class PlaygroundApiTests(TestCase):
         self.assertEqual(payload["generation"]["id"], first_payload["generation"]["id"])
         self.assertEqual(payload["generation"]["session_generation_count"], 1)
         self.assertEqual(PlaygroundGeneration.objects.count(), 1)
+        session.refresh_from_db()
+        self.assertEqual(session.generation_count, 1)
+
+    @override_settings(
+        AI_PLAYGROUND_MIN_GENERATE_INTERVAL_SECONDS=0,
+    )
+    def test_generate_expert_reuses_cached_result_for_same_preferences(self):
+        session = self._start_session()
+        self.client.post(
+            reverse("ai-playground-selfie-upload"),
+            {"image": self._image_file("selfie.jpg")},
+        )
+
+        with patch(
+            "ai_playground.views.generate_hair_preview",
+            return_value=SimpleNamespace(
+                image_bytes=b"fake-image-content",
+                mime_type="image/png",
+                provider="nanobanana",
+            ),
+        ) as mocked_generate:
+            first = self.client.post(
+                reverse("ai-playground-generate-expert"),
+                self._expert_payload(style_vibe="modern", lifestyle="office", maintenance="medium", hair_length="short"),
+            )
+            self.assertEqual(first.status_code, 200)
+            first_payload = first.json()
+
+            second = self.client.post(
+                reverse("ai-playground-generate-expert"),
+                self._expert_payload(style_vibe="modern", lifestyle="office", maintenance="medium", hair_length="short"),
+            )
+
+        self.assertEqual(second.status_code, 200)
+        payload = second.json()
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["reused"])
+        self.assertEqual(payload["generation"]["source"], "expert")
+        self.assertEqual(payload["generation"]["id"], first_payload["generation"]["id"])
+        self.assertEqual(payload["generation"]["session_generation_count"], 1)
+        self.assertEqual(PlaygroundGeneration.objects.count(), 1)
+        self.assertEqual(mocked_generate.call_count, 1)
         session.refresh_from_db()
         self.assertEqual(session.generation_count, 1)
 
@@ -754,6 +870,40 @@ class PlaygroundNanobananaUsageTests(TestCase):
 
         sent_payload = post_json.call_args.args[1]
         self.assertEqual(sent_payload["generationConfig"], {"responseModalities": ["IMAGE"]})
+
+    @override_settings(
+        AI_PLAYGROUND_NANOBANANA_API_KEY="test-api-key",
+        AI_PLAYGROUND_NANOBANANA_MODEL="gemini-3-pro-image-preview",
+    )
+    def test_nanobanana_expert_mode_sends_single_selfie_input(self):
+        response_payload = self._nanobanana_image_response_payload()
+        with (
+            patch(
+                "ai_playground.services._image_file_as_base64",
+                return_value=("image/jpeg", "selfie-data"),
+            ) as image_encoder,
+            patch("ai_playground.services._post_json", return_value=response_payload) as post_json,
+        ):
+            NanobananaProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/reference.jpg",
+                prompt_mode="expert",
+                expert_preferences={
+                    "style_vibe": "modern",
+                    "lifestyle": "balanced",
+                    "maintenance": "medium",
+                    "hair_length": "short",
+                },
+            )
+
+        self.assertEqual(image_encoder.call_count, 1)
+        sent_payload = post_json.call_args.args[1]
+        sent_parts = sent_payload["contents"][0]["parts"]
+        inline_parts = [part for part in sent_parts if part.get("inlineData")]
+        text_parts = [part.get("text", "") for part in sent_parts if part.get("text")]
+        self.assertEqual(len(inline_parts), 1)
+        self.assertIn("Image 1 (subject selfie for expert haircut analysis):", text_parts)
+        self.assertNotIn("Image 2 (target hairstyle reference):", text_parts)
 
     @override_settings(
         AI_PLAYGROUND_NANOBANANA_API_KEY="test-api-key",

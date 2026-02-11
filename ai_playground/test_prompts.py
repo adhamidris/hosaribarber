@@ -1,6 +1,7 @@
 from django.test import SimpleTestCase
 
 from .prompts import (
+    PROMPT_MODE_EXPERT,
     PROMPT_STYLE_FLASH,
     PROMPT_STYLE_PRO,
     build_hair_transformation_prompt,
@@ -151,3 +152,39 @@ class HairTransformationPromptTests(SimpleTestCase):
 
         self.assertNotIn("hair color", flash_prompt.lower())
         self.assertNotIn("hair color", pro_prompt.lower())
+
+    def test_expert_prompt_mode_uses_scientific_face_fit_language(self):
+        prompt = build_hair_transformation_prompt(
+            prompt_mode=PROMPT_MODE_EXPERT,
+            expert_preferences={
+                "style_vibe": "casual",
+                "lifestyle": "active",
+                "maintenance": "low",
+                "hair_length": "medium",
+            },
+        )
+        lowered = prompt.lower()
+        self.assertIn("expert haircut recommendation and simulation", lowered)
+        self.assertIn("hairline position", lowered)
+        self.assertIn("style vibe=casual", lowered)
+        self.assertIn("lifestyle=active", lowered)
+        self.assertIn("maintenance level=low", lowered)
+        self.assertIn("preferred length=medium", lowered)
+        self.assertIn("do not use external style-catalog assumptions", lowered)
+        self.assertIn("input context: image 1 is the subject selfie.", lowered)
+        self.assertNotIn("image 2 repeats the same selfie", lowered)
+        self.assertIn("you are a senior licensed barber and haircut consultant", lowered)
+        self.assertIn("current-state check: identify current visible hair length and density first", lowered)
+        self.assertIn("preferences are guidance, not hard constraints", lowered)
+        self.assertIn("do not invent non-existent long hair mass from very short cuts", lowered)
+        self.assertIn("if the input haircut is very short and the preference asks for long hair", lowered)
+        self.assertIn("realistic-over-literal rule: when realism and preference conflict, realism wins", lowered)
+        self.assertIn("without wigs, extensions, transplants, or synthetic add-ons", lowered)
+
+    def test_expert_prompt_mode_uses_defaults_when_preferences_missing(self):
+        prompt = build_hair_transformation_prompt(prompt_mode=PROMPT_MODE_EXPERT)
+        lowered = prompt.lower()
+        self.assertIn("style vibe=classic", lowered)
+        self.assertIn("lifestyle=balanced", lowered)
+        self.assertIn("maintenance level=medium", lowered)
+        self.assertIn("preferred length=short", lowered)

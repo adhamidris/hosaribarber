@@ -1,5 +1,7 @@
 PROMPT_STYLE_FLASH = "flash"
 PROMPT_STYLE_PRO = "pro"
+PROMPT_MODE_CATALOG = "catalog"
+PROMPT_MODE_EXPERT = "expert"
 PROMPT_SET_DEFAULT = 1
 PROMPT_SET_OPTIONS = (1, 2, 3, 4, 5)
 
@@ -20,6 +22,30 @@ def _normalize_style_description(style_description: str) -> str:
     return " ".join(str(style_description or "").split()).strip()
 
 
+def _normalize_expert_preferences(expert_preferences: dict | None) -> dict[str, str]:
+    if not isinstance(expert_preferences, dict):
+        return {
+            "style_vibe": "classic",
+            "lifestyle": "balanced",
+            "maintenance": "medium",
+            "hair_length": "short",
+        }
+
+    normalized = {
+        "style_vibe": str(expert_preferences.get("style_vibe", "classic") or "classic").strip().lower(),
+        "lifestyle": str(expert_preferences.get("lifestyle", "balanced") or "balanced").strip().lower(),
+        "maintenance": str(expert_preferences.get("maintenance", "medium") or "medium").strip().lower(),
+        "hair_length": str(expert_preferences.get("hair_length", "short") or "short").strip().lower(),
+    }
+
+    return {
+        "style_vibe": normalized["style_vibe"] if normalized["style_vibe"] else "classic",
+        "lifestyle": normalized["lifestyle"] if normalized["lifestyle"] else "balanced",
+        "maintenance": normalized["maintenance"] if normalized["maintenance"] else "medium",
+        "hair_length": normalized["hair_length"] if normalized["hair_length"] else "short",
+    }
+
+
 def _inject_hair_color_into_style_instruction(style_instruction: str, hair_color_name: str) -> str:
     normalized_hair_color = (hair_color_name or "").strip()
     if not normalized_hair_color:
@@ -28,6 +54,52 @@ def _inject_hair_color_into_style_instruction(style_instruction: str, hair_color
     if trimmed_instruction.endswith("."):
         trimmed_instruction = trimmed_instruction[:-1]
     return f"{trimmed_instruction} in {normalized_hair_color} color."
+
+
+def _build_expert_prompt(
+    *,
+    hair_color_name: str,
+    expert_preferences: dict | None,
+) -> str:
+    normalized_preferences = _normalize_expert_preferences(expert_preferences)
+    normalized_hair_color = (hair_color_name or "").strip()
+
+    style_vibe = normalized_preferences["style_vibe"]
+    lifestyle = normalized_preferences["lifestyle"]
+    maintenance = normalized_preferences["maintenance"]
+    hair_length = normalized_preferences["hair_length"]
+
+    color_instruction = (
+        f"Target hair color: {normalized_hair_color}."
+        if normalized_hair_color
+        else "Target hair color: keep natural tone."
+    )
+
+    return " ".join(
+        (
+            "Operation: Expert Haircut Recommendation and Simulation.",
+            "Role: You are a senior licensed barber and haircut consultant making a real, in-chair recommendation.",
+            "Input Context: Image 1 is the subject selfie.",
+            "Primary Goal: design and render a haircut that best fits the subject using professional barbering and facial-proportion analysis.",
+            "Analysis Rules: estimate face shape, forehead height, hairline position, recession pattern, hair density, and crown behavior from the selfie.",
+            "Current-State Check: identify current visible hair length and density first, then plan only feasible changes from that baseline.",
+            "Decision Rules: choose cut geometry, fade/taper level, top length distribution, and edge transitions that improve facial balance and natural realism.",
+            "User Preferences:",
+            f"style vibe={style_vibe}; lifestyle={lifestyle}; maintenance level={maintenance}; preferred length={hair_length}.",
+            "Feasibility Policy: prioritize physically realistic outcomes from the current hair state visible in Image 1.",
+            "Preferences are guidance, not hard constraints. If a preference conflicts with visible hair reality, choose the closest feasible alternative.",
+            "Length Realism Rules: do not invent non-existent long hair mass from very short cuts. Avoid major length jumps that would require months of growth.",
+            "Conflict Rule Example: if the input haircut is very short and the preference asks for long hair, keep a short/near-short realistic result and express the requested vibe through texture, taper, and shape details.",
+            "Service Realism Rules: keep the result achievable in a normal barbershop session without wigs, extensions, transplants, or synthetic add-ons.",
+            "Realistic-over-Literal Rule: when realism and preference conflict, realism wins.",
+            color_instruction,
+            "Do not use external style-catalog assumptions. Generate a best-fit haircut directly from the subject analysis and the stated preferences.",
+            "Strict Constraints: keep face identity, skin tone, body, clothing, and pose exactly unchanged.",
+            "Keep background, camera angle, and lighting unchanged.",
+            "Edit scalp hair only. Keep beard shape and beard color unchanged.",
+            "Output: return one realistic, high-fidelity portrait image.",
+        )
+    )
 
 
 def _flash_input_context_instruction(use_composite_input: bool, with_beard_reference: bool) -> str:
@@ -252,7 +324,15 @@ def build_hair_transformation_prompt(
     apply_beard_edit: bool = False,
     prompt_style: str = PROMPT_STYLE_PRO,
     prompt_set: int | str | None = PROMPT_SET_DEFAULT,
+    prompt_mode: str = PROMPT_MODE_CATALOG,
+    expert_preferences: dict | None = None,
 ) -> str:
+    if str(prompt_mode or "").strip().lower() == PROMPT_MODE_EXPERT:
+        return _build_expert_prompt(
+            hair_color_name=hair_color_name,
+            expert_preferences=expert_preferences,
+        )
+
     resolved_prompt_set = _resolve_prompt_set(prompt_set)
     normalized_style = str(prompt_style or "").strip().lower()
     if normalized_style == PROMPT_STYLE_FLASH:
