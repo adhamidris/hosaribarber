@@ -4,6 +4,9 @@ import io
 import json
 import logging
 import mimetypes
+import os
+import re
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -61,6 +64,85 @@ NANOBANANA_IMAGE_SIZE_OPTIONS = {"1K", "2K", "4K"}
 NANOBANANA_PRO_IMAGE_MODEL_PREFIX = "gemini-3-pro-image-preview"
 NANOBANANA_PROMPT_SET_OPTIONS = {1, 2, 3, 4, 5}
 NANOBANANA_DEFAULT_PROMPT_SET = 1
+HAIRFASTGAN_ALIGN_OPTIONS = {"Face", "Shape", "Color"}
+HAIRFASTGAN_DEFAULT_ALIGN = ["Face", "Shape", "Color"]
+HAIRFASTGAN_BLEND_OPTIONS = {"Article", "Alternative_v1", "Alternative_v2"}
+HAIRCLIP_SUPPORTED_HAIRSTYLES = {
+    "afro hairstyle",
+    "bob cut hairstyle",
+    "bowl cut hairstyle",
+    "braid hairstyle",
+    "caesar cut hairstyle",
+    "chignon hairstyle",
+    "cornrows hairstyle",
+    "crew cut hairstyle",
+    "crown braid hairstyle",
+    "curtained hair hairstyle",
+    "dido flip hairstyle",
+    "dreadlocks hairstyle",
+    "extensions hairstyle",
+    "fade hairstyle",
+    "fauxhawk hairstyle",
+    "finger waves hairstyle",
+    "french braid hairstyle",
+    "frosted tips hairstyle",
+    "full crown hairstyle",
+    "harvard clip hairstyle",
+    "hi-top fade hairstyle",
+    "high and tight hairstyle",
+    "hime cut hairstyle",
+    "jewfro hairstyle",
+    "jheri curl hairstyle",
+    "liberty spikes hairstyle",
+    "marcel waves hairstyle",
+    "mohawk hairstyle",
+    "pageboy hairstyle",
+    "perm hairstyle",
+    "pixie cut hairstyle",
+    "psychobilly wedge hairstyle",
+    "quiff hairstyle",
+    "regular taper cut hairstyle",
+    "ringlets hairstyle",
+    "shingle bob hairstyle",
+    "short hair hairstyle",
+    "slicked-back hairstyle",
+    "spiky hair hairstyle",
+    "surfer hair hairstyle",
+    "taper cut hairstyle",
+    "the rachel hairstyle",
+    "undercut hairstyle",
+    "updo hairstyle",
+}
+HAIRCLIP_DEFAULT_HAIRSTYLE = "short hair hairstyle"
+HAIRCLIP_KEYWORD_TO_HAIRSTYLE = (
+    ("afro", "afro hairstyle"),
+    ("bob", "bob cut hairstyle"),
+    ("bowl", "bowl cut hairstyle"),
+    ("braid", "braid hairstyle"),
+    ("caesar", "caesar cut hairstyle"),
+    ("chignon", "chignon hairstyle"),
+    ("cornrow", "cornrows hairstyle"),
+    ("crew", "crew cut hairstyle"),
+    ("crown braid", "crown braid hairstyle"),
+    ("curtain", "curtained hair hairstyle"),
+    ("dread", "dreadlocks hairstyle"),
+    ("fade", "fade hairstyle"),
+    ("fauxhawk", "fauxhawk hairstyle"),
+    ("finger wave", "finger waves hairstyle"),
+    ("french braid", "french braid hairstyle"),
+    ("frosted", "frosted tips hairstyle"),
+    ("mohawk", "mohawk hairstyle"),
+    ("perm", "perm hairstyle"),
+    ("pixie", "pixie cut hairstyle"),
+    ("quiff", "quiff hairstyle"),
+    ("ringlet", "ringlets hairstyle"),
+    ("slick back", "slicked-back hairstyle"),
+    ("spiky", "spiky hair hairstyle"),
+    ("surfer", "surfer hair hairstyle"),
+    ("taper", "taper cut hairstyle"),
+    ("undercut", "undercut hairstyle"),
+    ("updo", "updo hairstyle"),
+)
 
 
 def configured_provider_name() -> str:
@@ -100,11 +182,25 @@ def _provider_factory(provider_name: str):
         return NanobananaProvider()
     if provider_name == "grok":
         return GrokImagesProvider()
+    if provider_name in {"replicate_hairclip", "hairclip"}:
+        if not bool(getattr(settings, "AI_PLAYGROUND_REPLICATE_HAIRCLIP_ENABLED", False)):
+            raise PlaygroundProviderError(
+                "Replicate HairCLIP provider is disabled. "
+                "Set AI_PLAYGROUND_REPLICATE_HAIRCLIP_ENABLED=1 to enable testing."
+            )
+        return ReplicateHairCLIPProvider()
+    if provider_name in {"hf_hairfastgan", "hairfastgan"}:
+        if not bool(getattr(settings, "AI_PLAYGROUND_HF_HAIRFASTGAN_ENABLED", False)):
+            raise PlaygroundProviderError(
+                "Hugging Face HairFastGAN provider is disabled. "
+                "Set AI_PLAYGROUND_HF_HAIRFASTGAN_ENABLED=1 to enable testing."
+            )
+        return HairFastGANProvider()
     if provider_name == "stub":
         return StubProvider()
     raise PlaygroundProviderError(
         f"Unsupported provider '{provider_name}'. "
-        "Set AI_PLAYGROUND_PROVIDER to one of: nanobanana, grok, stub."
+        "Set AI_PLAYGROUND_PROVIDER to one of: nanobanana, grok, replicate_hairclip, hf_hairfastgan, stub."
     )
 
 
@@ -112,6 +208,26 @@ def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeo
     request_data = json.dumps(payload).encode("utf-8")
     request_headers = {"Content-Type": "application/json", **headers}
     request = Request(url=url, data=request_data, headers=request_headers, method="POST")
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            body = response.read().decode("utf-8")
+            if not body:
+                return {}
+            return json.loads(body)
+    except HTTPError as error:
+        error_body = error.read().decode("utf-8", errors="ignore")
+        message = f"Provider HTTP {error.code}"
+        if error_body:
+            message = f"{message}: {error_body[:500]}"
+        raise PlaygroundProviderError(message) from error
+    except URLError as error:
+        raise PlaygroundProviderError(f"Provider connection failed: {error.reason}") from error
+    except json.JSONDecodeError as error:
+        raise PlaygroundProviderError("Provider returned invalid JSON.") from error
+
+
+def _get_json(url: str, headers: dict[str, str], timeout_seconds: int) -> dict[str, Any]:
+    request = Request(url=url, headers=headers, method="GET")
     try:
         with urlopen(request, timeout=timeout_seconds) as response:
             body = response.read().decode("utf-8")
@@ -155,11 +271,73 @@ def _image_file_as_base64(file_path: str) -> tuple[str, str]:
     return _guess_mime_type(file_path), base64.b64encode(raw_bytes).decode("utf-8")
 
 
+def _image_file_as_data_url(
+    file_path: str,
+    *,
+    max_side: int = 1024,
+    jpeg_quality: int = 90,
+) -> str:
+    with Image.open(file_path) as raw_image:
+        image = raw_image.convert("RGB")
+        if max(image.width, image.height) > max_side:
+            ratio = max_side / float(max(image.width, image.height))
+            width = max(1, int(image.width * ratio))
+            height = max(1, int(image.height * ratio))
+            image = image.resize((width, height), Image.Resampling.LANCZOS)
+
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=jpeg_quality, optimize=True)
+    encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return f"data:image/jpeg;base64,{encoded}"
+
+
 def _decode_base64_payload(raw_value: str) -> bytes:
     try:
         return base64.b64decode(raw_value)
     except (ValueError, TypeError) as error:
         raise PlaygroundProviderError("Provider returned invalid base64 image payload.") from error
+
+
+def _coerce_filepath(raw_value: Any, *, context: str) -> str:
+    if isinstance(raw_value, str) and raw_value.strip():
+        return raw_value
+    if isinstance(raw_value, (tuple, list)) and raw_value:
+        first = raw_value[0]
+        if isinstance(first, str) and first.strip():
+            return first
+    raise PlaygroundProviderError(f"{context} did not return a valid image filepath.")
+
+
+def _load_hairfastgan_client_dependencies():
+    try:
+        import gradio_client
+    except ImportError as error:
+        raise PlaygroundProviderError(
+            "gradio_client is not installed. Run: pip install -r requirements.txt"
+        ) from error
+
+    client_cls = getattr(gradio_client, "Client", None)
+    file_helper = getattr(gradio_client, "handle_file", None) or getattr(gradio_client, "file", None)
+    if client_cls is None or file_helper is None:
+        raise PlaygroundProviderError(
+            "gradio_client is missing required APIs (Client/file). "
+            "Install a recent gradio_client package."
+        )
+    return client_cls, file_helper
+
+
+def _is_retryable_hairfastgan_error(error: Exception) -> bool:
+    error_text = str(error).strip().lower()
+    if not error_text:
+        return False
+    retry_markers = (
+        "the upstream gradio app has raised an exception",
+        "service unavailable",
+        "temporarily unavailable",
+        "deadline exceeded",
+        "connection reset",
+    )
+    return any(marker in error_text for marker in retry_markers)
 
 
 def _safe_int(value: Any) -> int | None:
@@ -180,6 +358,29 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
+
+
+def _normalized_style_text(raw_text: str) -> str:
+    if not raw_text:
+        return ""
+    normalized = raw_text.strip().lower().replace("-", " ")
+    normalized = re.sub(r"[^a-z0-9\s]+", " ", normalized)
+    return " ".join(normalized.split())
+
+
+def _resolve_hairclip_hairstyle(raw_text: str) -> str | None:
+    normalized = _normalized_style_text(raw_text)
+    if not normalized:
+        return None
+    if normalized in HAIRCLIP_SUPPORTED_HAIRSTYLES:
+        return normalized
+    with_suffix = f"{normalized} hairstyle"
+    if with_suffix in HAIRCLIP_SUPPORTED_HAIRSTYLES:
+        return with_suffix
+    for keyword, hairstyle in HAIRCLIP_KEYWORD_TO_HAIRSTYLE:
+        if keyword in normalized:
+            return hairstyle
+    return None
 
 
 def _first_present(*values: Any) -> Any:
@@ -354,6 +555,385 @@ def _build_composite_reference(selfie_path: str, reference_paths: list[str]) -> 
         buffer = io.BytesIO()
         composed.save(buffer, format="JPEG", quality=93)
         return buffer.getvalue()
+
+
+class HairFastGANProvider:
+    provider = "hf_hairfastgan"
+
+    def __init__(self):
+        self.space_id = str(
+            getattr(settings, "AI_PLAYGROUND_HF_HAIRFASTGAN_SPACE", "AIRI-Institute/HairFastGAN")
+        ).strip() or "AIRI-Institute/HairFastGAN"
+        self.hf_token = str(getattr(settings, "AI_PLAYGROUND_HF_HAIRFASTGAN_TOKEN", "")).strip()
+        self.align = self._resolved_align(
+            str(getattr(settings, "AI_PLAYGROUND_HF_HAIRFASTGAN_ALIGN", "Face,Shape,Color")).strip()
+        )
+        self.blending = self._resolved_blending(
+            str(getattr(settings, "AI_PLAYGROUND_HF_HAIRFASTGAN_BLENDING", "Article")).strip()
+        )
+        self.poisson_iters = _safe_int(
+            str(getattr(settings, "AI_PLAYGROUND_HF_HAIRFASTGAN_POISSON_ITERS", "0")).strip()
+        )
+        if self.poisson_iters is None:
+            self.poisson_iters = 0
+        self.poisson_erosion = _safe_int(
+            str(getattr(settings, "AI_PLAYGROUND_HF_HAIRFASTGAN_POISSON_EROSION", "15")).strip()
+        )
+        if self.poisson_erosion is None:
+            self.poisson_erosion = 15
+        swap_max_retries = _safe_int(
+            str(getattr(settings, "AI_PLAYGROUND_HF_HAIRFASTGAN_SWAP_MAX_RETRIES", "3")).strip()
+        )
+        self.swap_max_retries = 3 if swap_max_retries is None else max(1, swap_max_retries)
+        self.timeout_seconds = int(getattr(settings, "AI_PLAYGROUND_PROVIDER_TIMEOUT_SECONDS", 120))
+
+    @staticmethod
+    def _resolved_align(raw_align: str) -> list[str]:
+        if not raw_align:
+            return list(HAIRFASTGAN_DEFAULT_ALIGN)
+        normalized = [value.strip().title() for value in raw_align.split(",") if value.strip()]
+        picked = [value for value in normalized if value in HAIRFASTGAN_ALIGN_OPTIONS]
+        if not picked:
+            return list(HAIRFASTGAN_DEFAULT_ALIGN)
+        # Preserve canonical ordering expected by the space.
+        return [value for value in HAIRFASTGAN_DEFAULT_ALIGN if value in picked]
+
+    @staticmethod
+    def _resolved_blending(raw_blending: str) -> str:
+        normalized = raw_blending.strip()
+        if normalized in HAIRFASTGAN_BLEND_OPTIONS:
+            return normalized
+        return "Article"
+
+    def _build_client(self):
+        client_cls, file_helper = _load_hairfastgan_client_dependencies()
+        client_kwargs: dict[str, Any] = {}
+        if self.hf_token:
+            client_kwargs["hf_token"] = self.hf_token
+        try:
+            client = client_cls(self.space_id, **client_kwargs)
+        except TypeError:
+            # Backward compatibility for older gradio_client versions without hf_token argument.
+            client = client_cls(self.space_id)
+        return client, file_helper
+
+    def _resize_input(self, client, file_helper, *, input_path: str, api_name: str) -> str:
+        primary_align = list(self.align)
+        fallback_align = [value for value in primary_align if value != "Face"]
+
+        attempts = [primary_align]
+        if fallback_align != primary_align:
+            attempts.append(fallback_align)
+        if [] not in attempts:
+            attempts.append([])
+
+        last_error: Exception | None = None
+        for attempt_align in attempts:
+            try:
+                response = client.predict(
+                    img=file_helper(input_path),
+                    align=attempt_align,
+                    api_name=api_name,
+                )
+                return _coerce_filepath(response, context=f"HairFastGAN {api_name}")
+            except Exception as error:
+                last_error = error
+
+        message = f"HairFastGAN preprocessing failed at {api_name}."
+        if last_error is not None:
+            message = (
+                f"{message} Last error: {last_error.__class__.__name__}: "
+                f"{str(last_error)[:200]}"
+            )
+        raise PlaygroundProviderError(message) from last_error
+
+    def generate(
+        self,
+        *,
+        selfie_path: str,
+        reference_path: str,
+        beard_reference_path: str | None = None,
+        style_description: str = "",
+        hair_color_name: str = "",
+        beard_color_name: str = "",
+        apply_beard_edit: bool = False,
+    ) -> PlaygroundImageResult:
+        _ = style_description, hair_color_name, beard_color_name
+        if apply_beard_edit or beard_reference_path:
+            raise PlaygroundProviderError(
+                "HairFastGAN test integration currently supports hairstyle edits only. "
+                "Use beard style = None for this provider."
+            )
+        client, file_helper = self._build_client()
+
+        face_path = self._resize_input(
+            client,
+            file_helper,
+            input_path=selfie_path,
+            api_name="/resize_inner",
+        )
+        shape_path = self._resize_input(
+            client,
+            file_helper,
+            input_path=reference_path,
+            api_name="/resize_inner_1",
+        )
+        color_path = self._resize_input(
+            client,
+            file_helper,
+            input_path=reference_path,
+            api_name="/resize_inner_2",
+        )
+
+        last_swap_error: Exception | None = None
+        swap_response: Any = None
+        for attempt_number in range(1, self.swap_max_retries + 1):
+            try:
+                swap_response = client.predict(
+                    face=file_helper(face_path),
+                    shape=file_helper(shape_path),
+                    color=file_helper(color_path),
+                    blending=self.blending,
+                    poisson_iters=float(self.poisson_iters),
+                    poisson_erosion=float(self.poisson_erosion),
+                    api_name="/swap_hair",
+                )
+                break
+            except Exception as error:
+                last_swap_error = error
+                retryable_error = _is_retryable_hairfastgan_error(error)
+                if attempt_number >= self.swap_max_retries or not retryable_error:
+                    if retryable_error and attempt_number >= self.swap_max_retries:
+                        raise PlaygroundProviderError(
+                            "HairFastGAN generation failed during /swap_hair after "
+                            f"{self.swap_max_retries} attempts. "
+                            "The upstream Space is currently rejecting this input combination or is unstable. "
+                            f"{error.__class__.__name__}: {str(error)[:200]}"
+                        ) from error
+                    raise PlaygroundProviderError(
+                        "HairFastGAN generation failed during /swap_hair. "
+                        f"{error.__class__.__name__}: {str(error)[:200]}"
+                    ) from error
+                time.sleep(min(2 * attempt_number, 4))
+                client, file_helper = self._build_client()
+
+        if swap_response is None and last_swap_error is not None:
+            raise PlaygroundProviderError(
+                "HairFastGAN generation failed during /swap_hair. "
+                f"{last_swap_error.__class__.__name__}: {str(last_swap_error)[:200]}"
+            ) from last_swap_error
+
+        output_path: str
+        output_error = ""
+        if isinstance(swap_response, (tuple, list)):
+            output_path = _coerce_filepath(swap_response[0], context="HairFastGAN /swap_hair")
+            if len(swap_response) > 1 and isinstance(swap_response[1], str):
+                output_error = swap_response[1].strip()
+        else:
+            output_path = _coerce_filepath(swap_response, context="HairFastGAN /swap_hair")
+
+        if output_error:
+            raise PlaygroundProviderError(f"HairFastGAN returned an error: {output_error[:180]}")
+
+        if output_path.startswith(("http://", "https://")):
+            image_bytes, mime_type = _download_binary(output_path, self.timeout_seconds)
+        else:
+            if not os.path.exists(output_path):
+                raise PlaygroundProviderError("HairFastGAN returned an output path that does not exist.")
+            with open(output_path, "rb") as file_obj:
+                image_bytes = file_obj.read()
+            mime_type = _guess_mime_type(output_path)
+
+        return PlaygroundImageResult(
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+            provider=self.provider,
+        )
+
+
+class ReplicateHairCLIPProvider:
+    provider = "replicate_hairclip"
+
+    def __init__(self):
+        self.api_token = str(getattr(settings, "AI_PLAYGROUND_REPLICATE_API_TOKEN", "")).strip()
+        self.api_base = str(
+            getattr(settings, "AI_PLAYGROUND_REPLICATE_API_BASE", "https://api.replicate.com/v1")
+        ).strip() or "https://api.replicate.com/v1"
+        self.model_version = str(
+            getattr(
+                settings,
+                "AI_PLAYGROUND_REPLICATE_HAIRCLIP_MODEL_VERSION",
+                "b95cb2a16763bea87ed7ed851d5a3ab2f4655e94bcfb871edba029d4814fa587",
+            )
+        ).strip() or "b95cb2a16763bea87ed7ed851d5a3ab2f4655e94bcfb871edba029d4814fa587"
+        resolved_fallback = _resolve_hairclip_hairstyle(
+            str(
+                getattr(
+                    settings,
+                    "AI_PLAYGROUND_REPLICATE_HAIRCLIP_FALLBACK_HAIRSTYLE",
+                    HAIRCLIP_DEFAULT_HAIRSTYLE,
+                )
+            ).strip()
+        )
+        self.fallback_hairstyle = resolved_fallback or HAIRCLIP_DEFAULT_HAIRSTYLE
+
+        wait_seconds = _safe_int(
+            str(getattr(settings, "AI_PLAYGROUND_REPLICATE_HAIRCLIP_WAIT_SECONDS", "60")).strip()
+        )
+        if wait_seconds is None:
+            wait_seconds = 60
+        self.wait_seconds = max(1, min(wait_seconds, 60))
+
+        poll_interval = _safe_float(
+            str(getattr(settings, "AI_PLAYGROUND_REPLICATE_HAIRCLIP_POLL_INTERVAL_SECONDS", "2")).strip(),
+            default=2.0,
+        )
+        self.poll_interval_seconds = max(0.5, min(float(poll_interval), 10.0))
+
+        max_image_side = _safe_int(
+            str(getattr(settings, "AI_PLAYGROUND_REPLICATE_HAIRCLIP_MAX_IMAGE_SIDE", "1024")).strip()
+        )
+        self.max_image_side = 1024 if max_image_side is None else max(512, min(max_image_side, 2048))
+
+        jpeg_quality = _safe_int(
+            str(getattr(settings, "AI_PLAYGROUND_REPLICATE_HAIRCLIP_JPEG_QUALITY", "90")).strip()
+        )
+        if jpeg_quality is None:
+            jpeg_quality = 90
+        self.jpeg_quality = max(40, min(jpeg_quality, 95))
+
+        self.timeout_seconds = int(getattr(settings, "AI_PLAYGROUND_PROVIDER_TIMEOUT_SECONDS", 120))
+        self.predictions_endpoint = f"{self.api_base.rstrip('/')}/predictions"
+
+    def _auth_headers(self, *, include_wait_preference: bool = False) -> dict[str, str]:
+        headers = {"Authorization": f"Bearer {self.api_token}"}
+        if include_wait_preference:
+            headers["Prefer"] = f"wait={self.wait_seconds}"
+        return headers
+
+    def _build_prediction_input(
+        self,
+        *,
+        image_data_url: str,
+        style_description: str,
+        hair_color_name: str,
+    ) -> dict[str, Any]:
+        hairstyle = _resolve_hairclip_hairstyle(style_description) or self.fallback_hairstyle
+        color_text = hair_color_name.strip()
+
+        if color_text:
+            editing_type = "both"
+        else:
+            editing_type = "hairstyle"
+
+        payload: dict[str, Any] = {
+            "image": image_data_url,
+            "editing_type": editing_type,
+            "hairstyle_description": hairstyle,
+        }
+        if color_text:
+            payload["color_description"] = color_text
+        return payload
+
+    def _resolve_get_url(self, created_prediction: dict[str, Any]) -> str:
+        urls = created_prediction.get("urls")
+        if isinstance(urls, dict):
+            get_url = urls.get("get")
+            if isinstance(get_url, str) and get_url.strip():
+                return get_url
+
+        prediction_id = created_prediction.get("id")
+        if isinstance(prediction_id, str) and prediction_id.strip():
+            return f"{self.predictions_endpoint}/{prediction_id.strip()}"
+
+        raise PlaygroundProviderError("Replicate HairCLIP did not return a prediction poll URL.")
+
+    def _await_prediction(self, get_url: str) -> dict[str, Any]:
+        deadline = time.time() + self.timeout_seconds
+        while True:
+            prediction = _get_json(
+                get_url,
+                headers=self._auth_headers(),
+                timeout_seconds=self.timeout_seconds,
+            )
+            status = str(prediction.get("status", "")).strip().lower()
+            if status in {"succeeded", "failed", "canceled"}:
+                return prediction
+
+            if time.time() >= deadline:
+                raise PlaygroundProviderError(
+                    "Replicate HairCLIP request timed out while waiting for prediction completion."
+                )
+            time.sleep(self.poll_interval_seconds)
+
+    def generate(
+        self,
+        *,
+        selfie_path: str,
+        reference_path: str,
+        beard_reference_path: str | None = None,
+        style_description: str = "",
+        hair_color_name: str = "",
+        beard_color_name: str = "",
+        apply_beard_edit: bool = False,
+    ) -> PlaygroundImageResult:
+        _ = reference_path, beard_color_name
+        if apply_beard_edit or beard_reference_path:
+            raise PlaygroundProviderError(
+                "Replicate HairCLIP integration supports hairstyle edits only. "
+                "Use beard style = None for this provider."
+            )
+        if not self.api_token:
+            raise PlaygroundProviderError(
+                "Replicate API token is missing. Set AI_PLAYGROUND_REPLICATE_API_TOKEN."
+            )
+
+        image_data_url = _image_file_as_data_url(
+            selfie_path,
+            max_side=self.max_image_side,
+            jpeg_quality=self.jpeg_quality,
+        )
+        create_payload = {
+            "version": self.model_version,
+            "input": self._build_prediction_input(
+                image_data_url=image_data_url,
+                style_description=style_description,
+                hair_color_name=hair_color_name,
+            ),
+        }
+        created_prediction = _post_json(
+            self.predictions_endpoint,
+            create_payload,
+            headers=self._auth_headers(include_wait_preference=True),
+            timeout_seconds=self.timeout_seconds,
+        )
+        prediction_status = str(created_prediction.get("status", "")).strip().lower()
+        if prediction_status in {"starting", "processing"}:
+            get_url = self._resolve_get_url(created_prediction)
+            created_prediction = self._await_prediction(get_url)
+            prediction_status = str(created_prediction.get("status", "")).strip().lower()
+
+        if prediction_status != "succeeded":
+            error_text = str(created_prediction.get("error") or "Unknown provider error.").strip()
+            raise PlaygroundProviderError(
+                "Replicate HairCLIP generation failed. "
+                f"{error_text[:200]}"
+            )
+
+        output_url = _coerce_filepath(
+            created_prediction.get("output"),
+            context="Replicate HairCLIP output",
+        )
+        if not output_url.startswith(("http://", "https://")):
+            raise PlaygroundProviderError(
+                "Replicate HairCLIP returned an output reference that is not a downloadable URL."
+            )
+        image_bytes, mime_type = _download_binary(output_url, self.timeout_seconds)
+        return PlaygroundImageResult(
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+            provider=self.provider,
+        )
 
 
 class StubProvider:

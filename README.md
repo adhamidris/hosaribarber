@@ -21,7 +21,7 @@
 Set these environment variables before running the server to enable real AI image generation in `AI Playground`.
 `config/settings.py` auto-loads values from a root `.env` file when present.
 
-- `AI_PLAYGROUND_PROVIDER`: `nanobanana`, `grok`, or `stub`
+- `AI_PLAYGROUND_PROVIDER`: `nanobanana`, `grok`, `replicate_hairclip`, `hf_hairfastgan`, or `stub`
 - `AI_PLAYGROUND_PROVIDER_TIMEOUT_SECONDS`: request timeout in seconds
 - `AI_PLAYGROUND_MAX_IMAGE_SIZE_BYTES`: upload size limit
 - `AI_PLAYGROUND_SESSION_GENERATION_LIMIT`: max generation attempts per QR session
@@ -57,6 +57,57 @@ Grok images:
 - `AI_PLAYGROUND_GROK_MODEL` (default: `grok-2-image`)
 - `AI_PLAYGROUND_GROK_IMAGES_ENDPOINT` (default: `https://api.x.ai/v1/images/edits`)
 - `AI_PLAYGROUND_GROK_IMAGE_FORMAT` (default: `base64`)
+
+Replicate HairCLIP (test-gated):
+- `AI_PLAYGROUND_REPLICATE_HAIRCLIP_ENABLED`: must be `1` to allow provider use
+- `AI_PLAYGROUND_PROVIDER=replicate_hairclip`
+- `AI_PLAYGROUND_REPLICATE_API_TOKEN` (required)
+- `AI_PLAYGROUND_REPLICATE_API_BASE` (default: `https://api.replicate.com/v1`)
+- `AI_PLAYGROUND_REPLICATE_HAIRCLIP_MODEL_VERSION` (default: `b95cb2a16763bea87ed7ed851d5a3ab2f4655e94bcfb871edba029d4814fa587`)
+- `AI_PLAYGROUND_REPLICATE_HAIRCLIP_FALLBACK_HAIRSTYLE` (default: `short hair hairstyle`)
+- `AI_PLAYGROUND_REPLICATE_HAIRCLIP_WAIT_SECONDS` (default: `60`; max supported by Replicate sync wait is 60)
+- `AI_PLAYGROUND_REPLICATE_HAIRCLIP_POLL_INTERVAL_SECONDS` (default: `2`)
+- `AI_PLAYGROUND_REPLICATE_HAIRCLIP_MAX_IMAGE_SIDE` (default: `1024`)
+- `AI_PLAYGROUND_REPLICATE_HAIRCLIP_JPEG_QUALITY` (default: `90`)
+- HairCLIP provider currently edits hairstyle/color only (no beard edit path).
+
+Suggested `.env` block for HairCLIP:
+```env
+AI_PLAYGROUND_PROVIDER=replicate_hairclip
+AI_PLAYGROUND_REPLICATE_HAIRCLIP_ENABLED=1
+AI_PLAYGROUND_REPLICATE_API_TOKEN=r8_xxxxxxxxxxxxxxxxxxxxx
+AI_PLAYGROUND_REPLICATE_API_BASE=https://api.replicate.com/v1
+AI_PLAYGROUND_REPLICATE_HAIRCLIP_MODEL_VERSION=b95cb2a16763bea87ed7ed851d5a3ab2f4655e94bcfb871edba029d4814fa587
+AI_PLAYGROUND_REPLICATE_HAIRCLIP_FALLBACK_HAIRSTYLE=short hair hairstyle
+AI_PLAYGROUND_REPLICATE_HAIRCLIP_WAIT_SECONDS=60
+AI_PLAYGROUND_REPLICATE_HAIRCLIP_POLL_INTERVAL_SECONDS=2
+AI_PLAYGROUND_REPLICATE_HAIRCLIP_MAX_IMAGE_SIDE=1024
+AI_PLAYGROUND_REPLICATE_HAIRCLIP_JPEG_QUALITY=90
+```
+
+Hugging Face HairFastGAN (test-gated):
+- `AI_PLAYGROUND_HF_HAIRFASTGAN_ENABLED`: must be `1` to allow provider use
+- `AI_PLAYGROUND_PROVIDER=hf_hairfastgan`
+- `AI_PLAYGROUND_HF_HAIRFASTGAN_SPACE` (default: `AIRI-Institute/HairFastGAN`)
+- `AI_PLAYGROUND_HF_HAIRFASTGAN_TOKEN` (optional, recommended for rate limits/private spaces)
+- `AI_PLAYGROUND_HF_HAIRFASTGAN_ALIGN` (default: `Face,Shape,Color`)
+- `AI_PLAYGROUND_HF_HAIRFASTGAN_BLENDING` (default: `Article`; options: `Article`, `Alternative_v1`, `Alternative_v2`)
+- `AI_PLAYGROUND_HF_HAIRFASTGAN_POISSON_ITERS` (default: `0`)
+- `AI_PLAYGROUND_HF_HAIRFASTGAN_POISSON_EROSION` (default: `15`)
+- `AI_PLAYGROUND_HF_HAIRFASTGAN_SWAP_MAX_RETRIES` (default: `3`, retries transient upstream swap errors)
+
+Suggested `.env` block:
+```env
+AI_PLAYGROUND_PROVIDER=hf_hairfastgan
+AI_PLAYGROUND_HF_HAIRFASTGAN_ENABLED=1
+AI_PLAYGROUND_HF_HAIRFASTGAN_SPACE=AIRI-Institute/HairFastGAN
+AI_PLAYGROUND_HF_HAIRFASTGAN_TOKEN=
+AI_PLAYGROUND_HF_HAIRFASTGAN_ALIGN=Face,Shape,Color
+AI_PLAYGROUND_HF_HAIRFASTGAN_BLENDING=Article
+AI_PLAYGROUND_HF_HAIRFASTGAN_POISSON_ITERS=0
+AI_PLAYGROUND_HF_HAIRFASTGAN_POISSON_EROSION=15
+AI_PLAYGROUND_HF_HAIRFASTGAN_SWAP_MAX_RETRIES=3
+```
 
 Cleanup task:
 - `python manage.py cleanup_ai_playground --retention-hours 24`

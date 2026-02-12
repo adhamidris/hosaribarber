@@ -22,7 +22,10 @@ from .models import (
 )
 from .services import (
     GeminiUsageMetrics,
+    HairFastGANProvider,
     NanobananaProvider,
+    PlaygroundProviderError,
+    ReplicateHairCLIPProvider,
     _estimate_nanobanana_cost_usd,
     _extract_gemini_usage_metrics,
     _nanobanana_model_pricing,
@@ -687,6 +690,374 @@ class PlaygroundApiTests(TestCase):
         generation = PlaygroundGeneration.objects.first()
         self.assertIsNotNone(generation)
         self.assertEqual(generation.status, "failed")
+
+    @override_settings(
+        AI_PLAYGROUND_PROVIDER="hf_hairfastgan",
+        AI_PLAYGROUND_HF_HAIRFASTGAN_ENABLED=False,
+    )
+    def test_generate_returns_failure_when_hairfastgan_is_disabled(self):
+        self._start_session()
+        self.client.post(
+            reverse("ai-playground-selfie-upload"),
+            {"image": self._image_file("selfie.jpg")},
+        )
+
+        response = self.client.post(
+            reverse("ai-playground-generate"),
+            {
+                "style_id": str(self.active_style.id),
+                **self._selection_payload(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 502)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        generation = PlaygroundGeneration.objects.first()
+        self.assertIsNotNone(generation)
+        self.assertEqual(generation.status, "failed")
+
+    @override_settings(
+        AI_PLAYGROUND_PROVIDER="replicate_hairclip",
+        AI_PLAYGROUND_REPLICATE_HAIRCLIP_ENABLED=False,
+    )
+    def test_generate_returns_failure_when_replicate_hairclip_is_disabled(self):
+        self._start_session()
+        self.client.post(
+            reverse("ai-playground-selfie-upload"),
+            {"image": self._image_file("selfie.jpg")},
+        )
+
+        response = self.client.post(
+            reverse("ai-playground-generate"),
+            {
+                "style_id": str(self.active_style.id),
+                **self._selection_payload(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 502)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        generation = PlaygroundGeneration.objects.first()
+        self.assertIsNotNone(generation)
+        self.assertEqual(generation.status, "failed")
+
+
+class PlaygroundHairFastGANProviderTests(TestCase):
+    @override_settings(
+        AI_PLAYGROUND_HF_HAIRFASTGAN_ENABLED=True,
+        AI_PLAYGROUND_HF_HAIRFASTGAN_SPACE="AIRI-Institute/HairFastGAN",
+        AI_PLAYGROUND_HF_HAIRFASTGAN_TOKEN="hf_test_token",
+        AI_PLAYGROUND_HF_HAIRFASTGAN_ALIGN="Face,Shape,Color",
+        AI_PLAYGROUND_HF_HAIRFASTGAN_BLENDING="Article",
+        AI_PLAYGROUND_HF_HAIRFASTGAN_POISSON_ITERS="0",
+        AI_PLAYGROUND_HF_HAIRFASTGAN_POISSON_EROSION="15",
+    )
+    def test_hairfastgan_provider_calls_expected_space_apis(self):
+        result_path = "/tmp/hairfastgan-provider-test-result.png"
+        with open(result_path, "wb") as file_obj:
+            file_obj.write(b"fake-png")
+
+        class FakeClient:
+            last_instance = None
+
+            def __init__(self, *args, **kwargs):
+                self.init_args = args
+                self.init_kwargs = kwargs
+                self.calls = []
+                FakeClient.last_instance = self
+
+            def predict(self, **kwargs):
+                self.calls.append(kwargs)
+                api_name = kwargs.get("api_name")
+                if api_name == "/resize_inner":
+                    return "/tmp/face-resized.png"
+                if api_name == "/resize_inner_1":
+                    return "/tmp/shape-resized.png"
+                if api_name == "/resize_inner_2":
+                    return "/tmp/color-resized.png"
+                if api_name == "/swap_hair":
+                    return (result_path, "")
+                raise AssertionError(f"Unexpected api_name: {api_name}")
+
+        with patch(
+            "ai_playground.services._load_hairfastgan_client_dependencies",
+            return_value=(FakeClient, lambda value: value),
+        ):
+            provider = HairFastGANProvider()
+            result = provider.generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/style.jpg",
+            )
+
+        self.assertEqual(result.provider, "hf_hairfastgan")
+        self.assertEqual(result.image_bytes, b"fake-png")
+        self.assertEqual(result.mime_type, "image/png")
+
+        client = FakeClient.last_instance
+        self.assertIsNotNone(client)
+        self.assertEqual(client.init_args, ("AIRI-Institute/HairFastGAN",))
+        self.assertEqual(client.init_kwargs, {"hf_token": "hf_test_token"})
+        self.assertEqual(len(client.calls), 4)
+        self.assertEqual(client.calls[0]["api_name"], "/resize_inner")
+        self.assertEqual(client.calls[1]["api_name"], "/resize_inner_1")
+        self.assertEqual(client.calls[2]["api_name"], "/resize_inner_2")
+        self.assertEqual(client.calls[3]["api_name"], "/swap_hair")
+        self.assertEqual(client.calls[3]["blending"], "Article")
+        self.assertEqual(client.calls[3]["poisson_iters"], 0.0)
+        self.assertEqual(client.calls[3]["poisson_erosion"], 15.0)
+
+    @override_settings(
+        AI_PLAYGROUND_HF_HAIRFASTGAN_ENABLED=True,
+    )
+    def test_hairfastgan_provider_bubbles_space_error_message(self):
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                _ = args, kwargs
+
+            def predict(self, **kwargs):
+                api_name = kwargs.get("api_name")
+                if api_name in {"/resize_inner", "/resize_inner_1", "/resize_inner_2"}:
+                    return "/tmp/resized.png"
+                if api_name == "/swap_hair":
+                    return ("/tmp/unused.png", "face alignment failed")
+                raise AssertionError(f"Unexpected api_name: {api_name}")
+
+        with patch(
+            "ai_playground.services._load_hairfastgan_client_dependencies",
+            return_value=(FakeClient, lambda value: value),
+        ):
+            with self.assertRaises(PlaygroundProviderError) as captured_error:
+                HairFastGANProvider().generate(
+                    selfie_path="/tmp/selfie.jpg",
+                    reference_path="/tmp/style.jpg",
+                )
+
+        self.assertIn("face alignment failed", str(captured_error.exception))
+
+    @override_settings(
+        AI_PLAYGROUND_HF_HAIRFASTGAN_ENABLED=True,
+        AI_PLAYGROUND_HF_HAIRFASTGAN_ALIGN="Face,Shape,Color",
+    )
+    def test_hairfastgan_provider_retries_resize_without_face_alignment(self):
+        result_path = "/tmp/hairfastgan-provider-fallback-result.png"
+        with open(result_path, "wb") as file_obj:
+            file_obj.write(b"fake-png")
+
+        class FakeClient:
+            last_instance = None
+
+            def __init__(self, *args, **kwargs):
+                _ = args, kwargs
+                self.calls = []
+                FakeClient.last_instance = self
+
+            def predict(self, **kwargs):
+                self.calls.append(kwargs)
+                api_name = kwargs.get("api_name")
+                align = kwargs.get("align")
+                if api_name in {"/resize_inner", "/resize_inner_1", "/resize_inner_2"}:
+                    if align and "Face" in align:
+                        raise RuntimeError("face detector failed")
+                    return "/tmp/resized.png"
+                if api_name == "/swap_hair":
+                    return (result_path, "")
+                raise AssertionError(f"Unexpected api_name: {api_name}")
+
+        with patch(
+            "ai_playground.services._load_hairfastgan_client_dependencies",
+            return_value=(FakeClient, lambda value: value),
+        ):
+            result = HairFastGANProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/style.jpg",
+            )
+
+        self.assertEqual(result.provider, "hf_hairfastgan")
+        self.assertEqual(result.image_bytes, b"fake-png")
+
+        client = FakeClient.last_instance
+        self.assertIsNotNone(client)
+        resize_calls = [call for call in client.calls if call["api_name"] in {"/resize_inner", "/resize_inner_1", "/resize_inner_2"}]
+        self.assertEqual(len(resize_calls), 6)
+        self.assertEqual(resize_calls[0]["align"], ["Face", "Shape", "Color"])
+        self.assertEqual(resize_calls[1]["align"], ["Shape", "Color"])
+        self.assertEqual(resize_calls[2]["align"], ["Face", "Shape", "Color"])
+        self.assertEqual(resize_calls[3]["align"], ["Shape", "Color"])
+        self.assertEqual(resize_calls[4]["align"], ["Face", "Shape", "Color"])
+        self.assertEqual(resize_calls[5]["align"], ["Shape", "Color"])
+
+    @override_settings(
+        AI_PLAYGROUND_HF_HAIRFASTGAN_ENABLED=True,
+        AI_PLAYGROUND_HF_HAIRFASTGAN_SWAP_MAX_RETRIES=3,
+    )
+    def test_hairfastgan_provider_retries_swap_on_upstream_app_error(self):
+        result_path = "/tmp/hairfastgan-provider-retry-result.png"
+        with open(result_path, "wb") as file_obj:
+            file_obj.write(b"fake-png")
+
+        class FakeClient:
+            last_instance = None
+            swap_attempts_total = 0
+
+            def __init__(self, *args, **kwargs):
+                _ = args, kwargs
+                FakeClient.last_instance = self
+
+            def predict(self, **kwargs):
+                api_name = kwargs.get("api_name")
+                if api_name in {"/resize_inner", "/resize_inner_1", "/resize_inner_2"}:
+                    return "/tmp/resized.png"
+                if api_name == "/swap_hair":
+                    FakeClient.swap_attempts_total += 1
+                    if FakeClient.swap_attempts_total == 1:
+                        raise RuntimeError(
+                            "The upstream Gradio app has raised an exception but has not enabled verbose error reporting."
+                        )
+                    return (result_path, "")
+                raise AssertionError(f"Unexpected api_name: {api_name}")
+
+        with (
+            patch(
+                "ai_playground.services._load_hairfastgan_client_dependencies",
+                return_value=(FakeClient, lambda value: value),
+            ),
+            patch("ai_playground.services.time.sleep") as sleep_mock,
+        ):
+            result = HairFastGANProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/style.jpg",
+            )
+
+        self.assertEqual(result.provider, "hf_hairfastgan")
+        self.assertEqual(result.image_bytes, b"fake-png")
+        self.assertIsNotNone(FakeClient.last_instance)
+        self.assertEqual(FakeClient.swap_attempts_total, 2)
+        sleep_mock.assert_called_once()
+
+    @override_settings(
+        AI_PLAYGROUND_HF_HAIRFASTGAN_ENABLED=True,
+    )
+    def test_hairfastgan_provider_rejects_beard_edit_requests(self):
+        with self.assertRaises(PlaygroundProviderError) as captured_error:
+            HairFastGANProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/style.jpg",
+                beard_reference_path="/tmp/beard.jpg",
+                apply_beard_edit=True,
+            )
+
+        self.assertIn("hairstyle edits only", str(captured_error.exception).lower())
+
+
+class PlaygroundReplicateHairCLIPProviderTests(TestCase):
+    @override_settings(
+        AI_PLAYGROUND_REPLICATE_HAIRCLIP_ENABLED=True,
+        AI_PLAYGROUND_REPLICATE_API_TOKEN="r8_test_token",
+        AI_PLAYGROUND_REPLICATE_API_BASE="https://api.replicate.com/v1",
+        AI_PLAYGROUND_REPLICATE_HAIRCLIP_MODEL_VERSION="test-model-version",
+        AI_PLAYGROUND_REPLICATE_HAIRCLIP_FALLBACK_HAIRSTYLE="short hair hairstyle",
+        AI_PLAYGROUND_REPLICATE_HAIRCLIP_WAIT_SECONDS=45,
+    )
+    def test_replicate_hairclip_provider_calls_prediction_api(self):
+        with (
+            patch("ai_playground.services._image_file_as_data_url", return_value="data:image/jpeg;base64,abc"),
+            patch(
+                "ai_playground.services._post_json",
+                return_value={
+                    "status": "succeeded",
+                    "output": "https://replicate.delivery/fake-output.png",
+                },
+            ) as post_json_mock,
+            patch(
+                "ai_playground.services._download_binary",
+                return_value=(b"fake-png", "image/png"),
+            ) as download_binary_mock,
+        ):
+            result = ReplicateHairCLIPProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/style.jpg",
+                style_description="low fade cut",
+                hair_color_name="Ash Brown",
+            )
+
+        self.assertEqual(result.provider, "replicate_hairclip")
+        self.assertEqual(result.image_bytes, b"fake-png")
+        self.assertEqual(result.mime_type, "image/png")
+
+        post_json_mock.assert_called_once()
+        called_endpoint = post_json_mock.call_args.args[0]
+        called_payload = post_json_mock.call_args.args[1]
+        called_headers = post_json_mock.call_args.kwargs["headers"]
+        self.assertEqual(called_endpoint, "https://api.replicate.com/v1/predictions")
+        self.assertEqual(called_payload["version"], "test-model-version")
+        self.assertEqual(called_payload["input"]["editing_type"], "both")
+        self.assertEqual(called_payload["input"]["hairstyle_description"], "fade hairstyle")
+        self.assertEqual(called_payload["input"]["color_description"], "Ash Brown")
+        self.assertEqual(called_headers["Authorization"], "Bearer r8_test_token")
+        self.assertEqual(called_headers["Prefer"], "wait=45")
+        download_binary_mock.assert_called_once_with("https://replicate.delivery/fake-output.png", 120)
+
+    @override_settings(
+        AI_PLAYGROUND_REPLICATE_HAIRCLIP_ENABLED=True,
+        AI_PLAYGROUND_REPLICATE_API_TOKEN="r8_test_token",
+        AI_PLAYGROUND_REPLICATE_HAIRCLIP_FALLBACK_HAIRSTYLE="short hair hairstyle",
+        AI_PLAYGROUND_PROVIDER_TIMEOUT_SECONDS=15,
+    )
+    def test_replicate_hairclip_provider_polls_when_prediction_is_processing(self):
+        with (
+            patch("ai_playground.services._image_file_as_data_url", return_value="data:image/jpeg;base64,abc"),
+            patch(
+                "ai_playground.services._post_json",
+                return_value={
+                    "id": "pred_test_123",
+                    "status": "starting",
+                    "urls": {
+                        "get": "https://api.replicate.com/v1/predictions/pred_test_123",
+                    },
+                },
+            ),
+            patch(
+                "ai_playground.services._get_json",
+                side_effect=[
+                    {"status": "processing"},
+                    {
+                        "status": "succeeded",
+                        "output": "https://replicate.delivery/polled-output.png",
+                    },
+                ],
+            ) as get_json_mock,
+            patch("ai_playground.services.time.sleep") as sleep_mock,
+            patch(
+                "ai_playground.services._download_binary",
+                return_value=(b"fake-png", "image/png"),
+            ),
+        ):
+            result = ReplicateHairCLIPProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/style.jpg",
+                style_description="",
+            )
+
+        self.assertEqual(result.provider, "replicate_hairclip")
+        self.assertEqual(get_json_mock.call_count, 2)
+        sleep_mock.assert_called_once()
+
+    @override_settings(
+        AI_PLAYGROUND_REPLICATE_HAIRCLIP_ENABLED=True,
+        AI_PLAYGROUND_REPLICATE_API_TOKEN="r8_test_token",
+    )
+    def test_replicate_hairclip_provider_rejects_beard_edit_requests(self):
+        with self.assertRaises(PlaygroundProviderError) as captured_error:
+            ReplicateHairCLIPProvider().generate(
+                selfie_path="/tmp/selfie.jpg",
+                reference_path="/tmp/style.jpg",
+                beard_reference_path="/tmp/beard.jpg",
+                apply_beard_edit=True,
+            )
+
+        self.assertIn("hairstyle edits only", str(captured_error.exception).lower())
 
 
 class PlaygroundNanobananaUsageTests(TestCase):
